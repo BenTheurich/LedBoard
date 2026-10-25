@@ -10,14 +10,18 @@ import my_bus_script3 as bus
 
 
 class BusScrollTests(unittest.TestCase):
-    def observed_scroll(self, count):
+    def observed_scroll(self, count, render_seconds=0.0):
         held_pairs = []
         offsets = []
         self.waits = []
+        self.display_times = []
+        now = [0.0]
         image = Image.new("1", (64, max(2, count) * 8))
 
         def show(_, offset):
+            now[0] += render_seconds
             offsets.append(offset)
+            self.display_times.append((offset, now[0]))
 
         def sleep(seconds):
             self.waits.append((offsets[-1], seconds))
@@ -26,11 +30,13 @@ class BusScrollTests(unittest.TestCase):
                 self.assertEqual(offset % 8, 0)
                 held_pairs.append((offset // 8 + 1, offset // 8 + 2))
             else:
-                self.assertEqual(seconds, bus.SCROLL_SPEED)
+                self.assertAlmostEqual(seconds, bus.SCROLL_SPEED - render_seconds)
+            now[0] += seconds
 
         with patch.object(bus, "create_tall_scroll_image", return_value=(image, image.height)), \
                 patch.object(bus, "show_window", side_effect=show), \
-                patch.object(bus.time, "sleep", side_effect=sleep):
+                patch.object(bus.time, "sleep", side_effect=sleep), \
+                patch.object(bus.time, "monotonic", side_effect=lambda: now[0]):
             bus.run_vertical_scroll([("230:", "5m")] * count)
         self.assertEqual(offsets[0], 0)
         self.assertEqual(offsets[-1], 0)
@@ -51,7 +57,16 @@ class BusScrollTests(unittest.TestCase):
         self.assertEqual(self.offsets[bottom_frame + 1:], list(range(47, -1, -1)))
         bottom_pause = self.waits.index((48, bus.PAUSE_AT_ROWS))
         return_waits = self.waits[bottom_pause + 1:]
-        self.assertEqual(return_waits, [(offset, bus.SCROLL_SPEED) for offset in range(47, 0, -1)])
+        self.assertEqual([offset for offset, _ in return_waits], list(range(47, 0, -1)))
+        for _, delay in return_waits:
+            self.assertAlmostEqual(delay, bus.SCROLL_SPEED)
+
+    def test_slow_steady_pacing_includes_render_time_and_resumes_after_pauses(self):
+        self.observed_scroll(4, render_seconds=0.012)
+        self.assertEqual(bus.SCROLL_SPEED, 0.05)
+        # Check two downward runs and the return immediately after the bottom pause.
+        for first, second in ((1, 2), (9, 10), (17, 18)):
+            self.assertAlmostEqual(self.display_times[second][1] - self.display_times[first][1], 0.05)
 
     def test_short_or_empty_lists_hold_one_still_page(self):
         for count in (0, 1, 2):

@@ -3,7 +3,7 @@ from datetime import datetime
 from luma.core.legacy import text, textsize
 from luma.core.legacy.font import proportional, CP437_FONT
 from PIL import Image, ImageDraw
-from display_utils import map_serpentine
+from display_utils import FramePacer, map_serpentine
 
 # --- CONFIGURATION ---
 SEARCH_NAME = "Garching, Untere Straßäcker"
@@ -17,7 +17,7 @@ HOUR_DAY_START = 7
 HOUR_NIGHT_START = 20 
 
 # --- ANIMATION SETTINGS ---
-SCROLL_SPEED = 0.02    # Speed of the slide
+SCROLL_SPEED = 0.05    # One pixel every 50 ms, including rendering time
 PAUSE_AT_ROWS = 10.0   # Reading time while advancing through departures
 
 # --- HARDWARE ---
@@ -166,19 +166,25 @@ def run_vertical_scroll(bus_list):
     # If we have 4 lines (32px), and screen is 16px, we scroll 16px.
     max_scroll = tall_height - HEIGHT
     if max_scroll < 0: max_scroll = 0
+    pacer = FramePacer(1.0 / SCROLL_SPEED)
     
     # 2. SCROLL DOWN
     for y in range(0, max_scroll + 1):
         show_window(tall_image, y)
         
-        time.sleep(PAUSE_AT_ROWS if y % ROW_HEIGHT == 0 else SCROLL_SPEED)
+        if y % ROW_HEIGHT == 0:
+            time.sleep(PAUSE_AT_ROWS)
+            # Resume a steady cadence after reading instead of catching up.
+            pacer = FramePacer(1.0 / SCROLL_SPEED)
+        else:
+            pacer.wait()
     
     # 3. SCROLL UP
     # The return is a continuous reset; reading pauses belong only to the first pass.
     for y in range(max_scroll - 1, -1, -1):
         show_window(tall_image, y)
         if y > 0:
-            time.sleep(SCROLL_SPEED)
+            pacer.wait()
 
 def main():
     global device
