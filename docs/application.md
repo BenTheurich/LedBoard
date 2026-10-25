@@ -43,9 +43,9 @@ The clock uses the original CP437 font and 16-pixel stretch. Every digit has an 
 
 Falling Sand, Drawing Harmonograph, and Acid Rain run through `effect_runner.py` at a target of 20 FPS, using the same mapping and contrast 16. Each renderer uses elapsed time and bounded state. A terminated effect clears the board before the next program starts.
 
-Falling Sand begins with an empty display for one second, then pours up to 384 grains through a sweeping inlet. After settling, gravity switches upward for three seconds and downward for three seconds. A widening floor drain empties every remaining grain before the cycle starts again. The default cycle is about 21 seconds; its completion depends on full drainage, not an abrupt image reset. A blocked inlet tries other columns, and the drain eventually spans the full width.
+Falling Sand starts empty. Three fixed, evenly spaced spouts each release six grains per second. Grains fall downward and slide diagonally around obstacles, building three piles. When all three inlets remain blocked after movement, the entire image slides downward one row per physics step while the spouts continue emitting. After sixteen shifts, every grain from the old pile has left the display; the newer grains still in flight begin accumulating on the floor again. Gravity always points downward. A cycle takes about 39 seconds with the default seed.
 
-Drawing Harmonograph keeps the selected trajectory and a tail capped at 180 samples. Acid Rain uses sixteen staggered streams at 6–14 pixels per second, dotted tails, small code-like crossbars, and brief dissolving splashes. These three modes are directly available in the main controller; the temporary preview dashboard and rejected studies have been removed.
+Drawing Harmonograph keeps the selected trajectory and a tail capped at 180 samples. Acid Rain uses small monochrome code glyphs in sixteen staggered lanes, with a denser leading symbol and sparser tails. The code falls through the bottom and recycles above the display after its tail exits. These three modes are directly available in the main controller; the temporary preview dashboard and rejected studies have been removed.
 
 ## Hardware-free tests
 
@@ -65,7 +65,7 @@ python -m pip install --no-deps luma.core==2.4.2
 python -m unittest discover -s tests -v
 ```
 
-The suite compares the bulk mapping with the original pixel loop, checks every logical pixel's location, verifies pacing through a fake clock, checks fixed clock-cell/separator positions and second-change redraws, checks spectrum interpolation independently of render rate, and exercises concurrent Flask requests with fake subprocesses. Visualization checks cover repeated complete sand cycles, gravity changes, empty starts and drainage, fixed rain tempo, continued motion, and bounded state/catch-up work.
+The suite compares the bulk mapping with the original pixel loop, checks every logical pixel's location, verifies pacing through a fake clock, checks fixed clock-cell/separator positions and second-change redraws, checks spectrum interpolation independently of render rate, and exercises concurrent Flask requests with fake subprocesses. Visualization checks cover empty sand starts, three fixed spouts, downward physics, complete sliding drains with uninterrupted streams, repeated cycles, fixed rain tempo, continued motion, and bounded state/catch-up work.
 
 ## Deployment and recovery
 

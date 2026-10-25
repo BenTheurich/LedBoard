@@ -29,9 +29,9 @@ The installed programs use SPI bus 0, device 0, with `cascaded=16`, `block_orien
 | Bus Timetable | [my_bus_script3.py](app/my_bus_script3.py) | Two-row scrolling departures with day/night brightness |
 | Pong | [pong_explode2.py](app/pong_explode2.py) | Animated Pong with particle effects |
 | Music Visualizer | [visualizations.py](app/visualizations.py) | Simulated spectrum bars; no audio input |
-| Falling Sand | [falling_sand.py](app/falling_sand.py) | Starts empty, pours, reverses gravity, drains, and repeats |
+| Falling Sand | [falling_sand.py](app/falling_sand.py) | Three trickling streams build piles, which slide downward and drain before rebuilding |
 | Drawing Harmonograph | [harmonograph.py](app/harmonograph.py) | Looping trace with a gradually dotted tail |
-| Acid Rain | [acid_rain.py](app/acid_rain.py) | Matrix-style streams with dissolving bottom splashes |
+| Acid Rain | [acid_rain.py](app/acid_rain.py) | Falling Matrix-style code trails that pass through the bottom |
 | TURN OFF | [clear_screen.py](app/clear_screen.py) | Clears the matrix |
 
 The bus program queries MVG through the Python `mvg` package for **Garching, Untere Straßäcker**, filtering lines **230**, **292**, and **X205** toward **Forschungszentrum**. It displays X205 as `205`. U6 departures at Garching-Forschungszentrum were part of the original goal and are not implemented in this selected program.
