@@ -1,8 +1,5 @@
 import time
 from datetime import datetime
-from mvg import MvgApi
-from luma.core.interface.serial import spi, noop
-from luma.led_matrix.device import max7219
 from luma.core.legacy import text, textsize
 from luma.core.legacy.font import proportional, CP437_FONT
 from PIL import Image, ImageDraw
@@ -21,17 +18,15 @@ HOUR_NIGHT_START = 20
 
 # --- ANIMATION SETTINGS ---
 SCROLL_SPEED = 0.02    # Speed of the slide
-PAUSE_AT_ENDS = 10.0    # Wait time at top/bottom
+PAUSE_AT_ROWS = 10.0   # Reading time at each complete two-row view
 
 # --- HARDWARE ---
-serial = spi(port=0, device=0, gpio=noop())
-# UPDATED: cascaded=16 for your full 16x64 setup
-device = max7219(serial, cascaded=16, block_orientation=-90, rotate=0)
-device.contrast(BRIGHTNESS_DAY)
+device = None  # Initialized only when this script runs on the Pi.
 
 # Logical Dimensions
 WIDTH = 64
-HEIGHT = 16  # We now show 2 rows (16 pixels) at once
+ROW_HEIGHT = 8
+HEIGHT = 2 * ROW_HEIGHT
 
 found_station_id = None 
 
@@ -45,6 +40,8 @@ def check_brightness():
         device.contrast(BRIGHTNESS_NIGHT)
 
 def get_departures():
+    from mvg import MvgApi
+
     global found_station_id
     try:
         if found_station_id is None:
@@ -136,10 +133,10 @@ def create_tall_scroll_image(bus_list):
     if not bus_list:
         bus_list = ["No Bus Found", ""]
     elif len(bus_list) == 1:
-        bus_list.append("") # Pad with empty line if only 1 bus
+        bus_list = [*bus_list, ""]  # Keep the caller's departure list unchanged.
         
     num_lines = len(bus_list)
-    virtual_height = num_lines * 8
+    virtual_height = num_lines * ROW_HEIGHT
     
     # Create the tall canvas
     master_img = Image.new("1", (WIDTH, virtual_height), 0)
@@ -150,7 +147,7 @@ def create_tall_scroll_image(bus_list):
         
         # Paste it into the master image at the correct Y offset
         # Line 0 goes at y=0, Line 1 goes at y=8, etc.
-        master_img.paste(line_img, (0, i * 8))
+        master_img.paste(line_img, (0, i * ROW_HEIGHT))
         
     return master_img, virtual_height
 
@@ -160,7 +157,7 @@ def show_window(source_img, scroll_y):
     device.display(map_serpentine(window))
 
 def run_vertical_scroll(bus_list):
-    """Handles the Scroll Down -> Scroll Up logic."""
+    """Pause at every complete pair so middle departures remain readable."""
     
     # 1. Create the tall image containing all buses
     tall_image, tall_height = create_tall_scroll_image(bus_list)
@@ -174,33 +171,34 @@ def run_vertical_scroll(bus_list):
     for y in range(0, max_scroll + 1):
         show_window(tall_image, y)
         
-        if y == 0:
-            time.sleep(PAUSE_AT_ENDS)
-        else:
-            time.sleep(SCROLL_SPEED)
-            
-    # Pause at bottom
-    time.sleep(PAUSE_AT_ENDS)
+        time.sleep(PAUSE_AT_ROWS if y % ROW_HEIGHT == 0 else SCROLL_SPEED)
     
     # 3. SCROLL UP
-    for y in range(max_scroll, -1, -1):
+    # The bottom already paused; return to the top before fetching fresh data.
+    for y in range(max_scroll - 1, -1, -1):
         show_window(tall_image, y)
-        time.sleep(SCROLL_SPEED)
+        if y > 0:
+            time.sleep(PAUSE_AT_ROWS if y % ROW_HEIGHT == 0 else SCROLL_SPEED)
 
-# --- MAIN LOOP ---
-print(f"Starting 2-Row Bus Scroll... Day: {BRIGHTNESS_DAY} / Night: {BRIGHTNESS_NIGHT}")
+def main():
+    global device
+    from luma.core.interface.serial import spi, noop
+    from luma.led_matrix.device import max7219
 
-try:
-    while True:
-        check_brightness()
-        busses = get_departures()
-        
-        # Run the scroll animation
-        run_vertical_scroll(busses)
-        
-        # If API failed or empty, wait a bit extra
-        if len(busses) == 0:
-            time.sleep(5)
+    device = max7219(spi(port=0, device=0, gpio=noop()), cascaded=16,
+                     block_orientation=-90, rotate=0)
+    device.contrast(BRIGHTNESS_DAY)
+    print(f"Starting 2-Row Bus Scroll... Day: {BRIGHTNESS_DAY} / Night: {BRIGHTNESS_NIGHT}")
+    try:
+        while True:
+            check_brightness()
+            busses = get_departures()
+            run_vertical_scroll(busses)
+            if not busses:
+                time.sleep(5)
+    except KeyboardInterrupt:
+        pass
 
-except KeyboardInterrupt:
-    pass
+
+if __name__ == "__main__":
+    main()

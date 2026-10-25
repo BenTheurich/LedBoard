@@ -13,7 +13,7 @@ cd /path/to/garching-board/app
 python3 app.py
 ```
 
-Do not start a second controller or display program while another process owns the matrices. The controller, clock, visualizer, Pong, Falling Sand, Drawing Harmonograph, and Acid Rain defer hardware initialization until execution so tests can import them safely. The other original display programs still initialize SPI at import and must not be imported for an ordinary desktop syntax check.
+Do not start a second controller or display program while another process owns the matrices. The controller, clock, bus timetable, visualizer, Pong, Falling Sand, Drawing Harmonograph, and Acid Rain defer hardware initialization until execution so tests can import them safely. Game of Life still initializes SPI at import and must not be imported for an ordinary desktop syntax check.
 
 The controller binds to `0.0.0.0:5000` with Flask debug mode disabled. At startup it tries to scroll its local IP address on the display. It then starts the web controller with the selected-program indicator set to OFF; there is no saved-mode restoration in the imported code. The page's `/run` POST route switches display programs.
 
@@ -128,4 +128,4 @@ Do not install a different GPIO backend over the working environment merely to s
 
 The programs use SPI bus 0 / device 0 and initialize MAX7219 with sixteen cascaded devices, block orientation -90°, and rotation 0°. The logical image is 64×16. Its top 64×8 row maps directly to physical pixels 0–63; its bottom row maps to pixels 64–127 with both X and Y reversed.
 
-`my_bus_script3.py` selects `Garching, Untere Straßäcker`, destination substring `Forschungszentrum`, and lines `230`, `292`, and `X205`. It shows at most eight matching departures and renders X205 as `205`. Day brightness is 32 from 07:00 until 20:00; night brightness is 10, using the Pi's local clock. It fetches another set of departures after each scrolling cycle. API exceptions and no matching departures both result in the current `No Bus Found` display, so the screen does not distinguish those cases.
+`my_bus_script3.py` selects `Garching, Untere Straßäcker`, destination substring `Forschungszentrum`, and lines `230`, `292`, and `X205`. It shows at most eight matching departures and renders X205 as `205`. The vertical scroll pauses for ten seconds at every complete two-row view, including intermediate pairs on the way down and back up. The endpoints pause once each cycle. Day brightness is 32 from 07:00 until 20:00; night brightness is 10, using the Pi's local clock. It fetches another set of departures after each scrolling cycle. API exceptions and no matching departures both result in the current `No Bus Found` display, so the screen does not distinguish those cases.
