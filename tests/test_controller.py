@@ -1,4 +1,5 @@
 import importlib.util
+from html.parser import HTMLParser
 from pathlib import Path
 import subprocess
 import sys
@@ -54,7 +55,6 @@ class ControllerTests(unittest.TestCase):
         controller.app.config["TESTING"] = True
         controller.current_process = None
         controller.active_script_name = "OFF"
-        controller.last_message = ""
         controller.switch_lock = threading.Lock()
 
     def tearDown(self):
@@ -191,10 +191,39 @@ class ControllerTests(unittest.TestCase):
             html = client.get(response.location).get_data(as_text=True)
             self.assertIn('value="Message Board"', html)
             self.assertIn('class="indicator active"', html)
-            self.assertEqual(controller.last_message, "--hello; $(no command)\nSecond line")
+            self.assert_blank_message_field(html)
+            self.assert_blank_message_field(client.get("/").get_data(as_text=True))
             client.post("/run", data={"script_name": "Clock"})
             self.assertFalse(created[1].alive)
             self.assertTrue(created[2].alive)
+
+    def assert_blank_message_field(self, html):
+        class MessageField(HTMLParser):
+            attrs = None
+            value = ""
+            inside = False
+
+            def handle_starttag(self, tag, attrs):
+                if tag == "textarea":
+                    self.attrs = dict(attrs)
+                    self.inside = True
+
+            def handle_data(self, data):
+                if self.inside:
+                    self.value += data
+
+            def handle_endtag(self, tag):
+                if tag == "textarea":
+                    self.inside = False
+
+        field = MessageField()
+        field.feed(html)
+        self.assertIsNotNone(field.attrs)
+        self.assertEqual(field.value, "")
+        self.assertEqual(field.attrs["placeholder"], "Type your message here")
+
+    def test_message_field_starts_blank(self):
+        self.assert_blank_message_field(controller.app.test_client().get("/").get_data(as_text=True))
 
     def test_invalid_messages_preserve_current_display_and_form_text(self):
         process = Mock()

@@ -15,12 +15,12 @@ from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageDraw
 from luma.core.legacy import text, textsize
-from luma.core.legacy.font import TINY_FONT, proportional
+from luma.core.legacy.font import LCD_FONT, SEG7_FONT, proportional
 
 from matrix_text import panel_duration, render_lines
 
 
-PAGE_SECONDS = 4.0
+PAGE_SECONDS = 6.0
 OVERVIEW_SECONDS = 16.0
 OVERVIEW_HOURS = (8, 12, 16, 20)
 REFRESH_SECONDS = 600
@@ -28,7 +28,11 @@ RETRY_SECONDS = 60
 STALE_SECONDS = 1200
 EXPIRE_SECONDS = 7200
 MAX_RESPONSE_BYTES = 256 * 1024
-_FONT = proportional(TINY_FONT)
+_FONT = proportional(LCD_FONT)
+_NUMERIC_BITMAPS = list(SEG7_FONT)
+# SEG7 has no minus sign. Keep negative temperatures explicit and readable.
+_NUMERIC_BITMAPS[ord("-")] = [0x10, 0x10, 0x10, 0]
+_NUMERIC_FONT = proportional(_NUMERIC_BITMAPS)
 
 
 @dataclass(frozen=True)
@@ -191,7 +195,7 @@ def _probability(value):
 
 
 def _amount(value):
-    return "--mm" if value is None else f"{value:.1f}mm"
+    return "--MM" if value is None else f"{value:.1f}MM"
 
 
 def overview_points(forecast, now, tz):
@@ -207,39 +211,43 @@ def overview_points(forecast, now, tz):
 
 @lru_cache(maxsize=8)
 def render_overview(points):
-    """Four 16px columns: time, Celsius temperature, precipitation-chance bar."""
+    """Four columns with 7px hour labels above 7px Celsius temperatures."""
     image = Image.new("1", (64, 16), 0)
     draw = ImageDraw.Draw(image)
     for index, (hour, forecast) in enumerate(points):
         left = index * 16
         temperature = _temperature(forecast.temperature if forecast else None) + "C"
-        # Extreme signed three-digit values fit without the repeated unit suffix.
-        if textsize(temperature, _FONT)[0] > 16:
-            temperature = temperature[:-1]
-        for value, top in ((f"{hour:02d}", -1), (temperature, 5)):
-            width, _ = textsize(value, _FONT)
-            text(draw, (left + (16 - width) // 2, top), value, fill="white", font=_FONT)
-        probability = forecast.probability if forecast else None
-        if probability is None:
-            text(draw, (left + 6, 10), "?", fill="white", font=_FONT)
-        elif probability > 0:
-            # Keep even a small nonzero chance visible on the four-pixel scale.
-            height = min(4, math.ceil(probability / 25))
-            draw.rectangle((left + 3, 16 - height, left + 12, 15), fill="white")
+        width, _ = textsize(f"{hour:02d}", _FONT)
+        text(draw, (left + (16 - width) // 2, 0), f"{hour:02d}", fill="white", font=_FONT)
+        width, _ = textsize(temperature, _NUMERIC_FONT)
+        strip = Image.new("1", (width, 8), 0)
+        text(ImageDraw.Draw(strip), (0, 0), temperature, fill="white", font=_NUMERIC_FONT)
+        if width > 16:
+            # Preserve the sign and unit even for an extreme three-digit reading.
+            strip = strip.resize((16, 8), Image.Resampling.NEAREST)
+            width = 16
+        image.paste(strip, (left + (16 - width) // 2, 8))
     return image
 
 
 def forecast_pages(forecast, now, tz):
-    """Two brief detail cards; the four-point overview gets most screen time."""
+    """Label each reading explicitly instead of packing abbreviations together."""
     today = datetime.fromtimestamp(now, tz).date().isoformat()
     day = next((day for day in forecast.days if day.date == today), None)
-    high_low = "TODAY --" if day is None else f"H{_temperature(day.high)} L{_temperature(day.low)}"
-    current = f"NOW {_temperature(forecast.temperature)}C {high_low}"
-    rain = ("WET " + _probability(day.probability if day else None)
+    high = _temperature(day.high if day else None)
+    low = _temperature(day.low if day else None)
+    rain = (_probability(day.probability if day else None)
             + " " + _amount(day.precipitation if day else None))
     wind = "--" if forecast.wind is None else str(round(forecast.wind))
-    return [(current, condition_label(forecast.condition)),
-            (rain, f"FEEL {_temperature(forecast.apparent)}C W{wind}km/h")]
+    pages = [(f"NOW {_temperature(forecast.temperature)}C", condition_label(forecast.condition)),
+             (f"HIGH {high}C", f"LOW {low}C"),
+             ("RAIN TODAY", rain),
+             (f"FEELS {_temperature(forecast.apparent)}C", f"WIND {wind}KM/H")]
+    for hour, point in overview_points(forecast, now, tz):
+        chance = _probability(point.probability if point else None)
+        amount = _amount(point.precipitation if point else None)
+        pages.append((f"RAIN {hour:02d}H", chance + " " + amount))
+    return pages
 
 
 class Weather:
@@ -296,18 +304,18 @@ class Weather:
     def render(self, elapsed, delta):
         forecast, now, status = self._state()
         if status:
-            return render_lines(status, elapsed)
+            return render_lines(status, elapsed, font=_FONT)
         pages = forecast_pages(forecast, now, self.tz)
-        durations = [panel_duration(page, minimum=PAGE_SECONDS) for page in pages]
+        durations = [panel_duration(page, font=_FONT, minimum=PAGE_SECONDS) for page in pages]
         remaining = max(0.0, elapsed) % (OVERVIEW_SECONDS + sum(durations))
         if remaining < OVERVIEW_SECONDS:
             return render_overview(overview_points(forecast, now, self.tz))
         remaining -= OVERVIEW_SECONDS
         for page, duration in zip(pages, durations):
             if remaining < duration:
-                return render_lines(page, remaining)
+                return render_lines(page, remaining, font=_FONT)
             remaining -= duration
-        return render_lines(pages[-1], 0.0)
+        return render_lines(pages[-1], 0.0, font=_FONT)
 
 
 def main():

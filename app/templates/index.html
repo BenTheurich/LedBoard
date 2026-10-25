@@ -105,6 +105,7 @@
             outline: 2px solid #bb86fc;
             outline-offset: 3px;
         }
+        textarea::placeholder { color: #999; opacity: 1; }
         .message-error { color: #ffb4b4; margin: 0 0 10px; font-size: 0.9rem; }
         button[value="Weather"] { border-left: 5px solid #80cbc4; }
         button[value="Message Board"] { border-left: 5px solid #90caf9; }
@@ -144,7 +145,7 @@
 
         <form id="message" action="/message" method="post">
             <label class="message-label" for="message-text">Message</label>
-            <textarea id="message-text" name="message" rows="2" maxlength="{{ max_message_length }}" required{% if message_error %} aria-invalid="true" aria-describedby="message-error" autofocus{% endif %}>{{ message_value }}</textarea>
+            <textarea id="message-text" name="message" rows="2" maxlength="{{ max_message_length }}" placeholder="Type your message here" autocomplete="off" required{% if message_error %} aria-invalid="true" aria-describedby="message-error" autofocus{% endif %}>{{ message_value }}</textarea>
             {% if message_error %}<p class="message-error" id="message-error" role="alert">{{ message_error }}</p>{% endif %}
             <button type="submit" name="script_name" value="Message Board">
                 Send

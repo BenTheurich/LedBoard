@@ -27,7 +27,7 @@ The installed programs use SPI bus 0, device 0, with `cascaded=16`, `block_orien
 | Clock | [clock.py](app/clock.py) | Stretched hours, minutes, and seconds in fixed-width digit cells |
 | Game of Life | [game_of_life.py](app/game_of_life.py) | Cellular automaton |
 | Bus Timetable | [my_bus_script3.py](app/my_bus_script3.py) | Two-row scrolling departures with day/night brightness |
-| Weather | [weather.py](app/weather.py) | Four daily forecast points in Celsius with precipitation chance bars, plus current conditions and high/low |
+| Weather | [weather.py](app/weather.py) | Four daily Celsius forecast points, plus labeled current conditions, high/low, and hourly rain screens |
 | Message Board | [message.py](app/message.py) | Send up to two lines from the controller; long rows scroll horizontally |
 | Pong | [pong_explode2.py](app/pong_explode2.py) | Animated Pong with particle effects |
 | Music Visualizer | [visualizations.py](app/visualizations.py) | Simulated spectrum bars; no audio input |

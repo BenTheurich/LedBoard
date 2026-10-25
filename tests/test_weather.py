@@ -39,13 +39,15 @@ class WeatherTests(unittest.TestCase):
             self.assertFalse(display.refresh())
         self.assertEqual(display.pages(), [("WEATHER", "UNAVAILABLE")])
         self.assertTrue(display.refresh())
-        self.assertEqual(display.pages()[0][0], "NOW 12C H16 L4")
+        self.assertEqual(display.pages()[0][0], "NOW 12C")
 
-    def test_two_summary_cards_show_current_high_low_condition_and_rain(self):
+    def test_detail_cards_use_explicit_labels_and_units(self):
         forecast = weather.parse_forecast(response_fixture(), CET)
         pages = weather.forecast_pages(forecast, NOW, CET)
-        self.assertEqual(pages, [("NOW 12C H16 L4", "RAIN"),
-                                 ("WET 80% 3.2mm", "FEEL 9C W18km/h")])
+        self.assertEqual(pages[:4], [("NOW 12C", "RAIN"), ("HIGH 16C", "LOW 4C"),
+                                    ("RAIN TODAY", "80% 3.2MM"), ("FEELS 9C", "WIND 18KM/H")])
+        self.assertEqual(pages[4:], [(f"RAIN {hour:02d}H", "65% 0.8MM")
+                                    for hour in (8, 12, 16, 20)])
 
     def test_four_fixed_points_include_earlier_hours_and_do_not_use_tomorrow(self):
         data = response_fixture()
@@ -68,8 +70,10 @@ class WeatherTests(unittest.TestCase):
         data["hourly"]["precipitation_probability"] = [101] * 48
         data["hourly"]["precipitation"] = [-1] * 48
         pages = weather.forecast_pages(weather.parse_forecast(data, CET), NOW, CET)
-        self.assertIn(("NOW --C H16 L4", "CONDITION --"), pages)
-        self.assertIn(("WET --% --mm", "FEEL --C W18km/h"), pages)
+        self.assertIn(("NOW --C", "CONDITION --"), pages)
+        self.assertIn(("RAIN TODAY", "--% --MM"), pages)
+        self.assertIn(("FEELS --C", "WIND 18KM/H"), pages)
+        self.assertEqual(pages[-1], ("RAIN 20H", "--% --MM"))
         points = weather.overview_points(weather.parse_forecast(data, CET), NOW, CET)
         self.assertTrue(all(value.probability is None for _, value in points))
         for bad in ({"error": True}, {}, {"current": []}, {"hourly": {"time": "bad"}}):
@@ -84,13 +88,13 @@ class WeatherTests(unittest.TestCase):
         forecast = weather.parse_forecast(response_fixture(), CET)
         late = datetime(2026, 10, 25, 23, 30, tzinfo=CET).timestamp()
         pages = weather.forecast_pages(forecast, late, CET)
-        self.assertEqual(pages[0][0], "NOW 12C H16 L4")
+        self.assertEqual(pages[1], ("HIGH 16C", "LOW 4C"))
         tomorrow = late + 3600
         pages = weather.forecast_pages(forecast, tomorrow, CET)
-        self.assertEqual(pages[0][0], "NOW 12C H18 L5")
+        self.assertEqual(pages[1], ("HIGH 18C", "LOW 5C"))
         day_after = datetime(2026, 10, 27, 12, tzinfo=CET).timestamp()
         pages = weather.forecast_pages(forecast, day_after, CET)
-        self.assertEqual(pages[0][0], "NOW 12C TODAY --")
+        self.assertEqual(pages[1], ("HIGH --C", "LOW --C"))
         self.assertTrue(all(value is None for _, value in weather.overview_points(forecast, day_after, CET)))
 
     def test_failed_refresh_marks_cached_data_old_and_eventually_expires(self):
@@ -103,7 +107,7 @@ class WeatherTests(unittest.TestCase):
             self.assertFalse(display.refresh())
         self.assertEqual(display.pages(), [("WEATHER", "UNAVAILABLE")])
         self.assertTrue(display.refresh())
-        self.assertEqual(display.pages()[0][0], "NOW 12C H16 L4")
+        self.assertEqual(display.pages()[0][0], "NOW 12C")
         with patch("builtins.print"):
             self.assertFalse(display.refresh())
         self.assertEqual(display.pages(), [("WEATHER OLD", "RETRYING")])
@@ -134,7 +138,8 @@ class WeatherTests(unittest.TestCase):
                                   tz=CET, clock=lambda: NOW, start_worker=False)
         display.refresh()
         times = [0, 8, weather.OVERVIEW_SECONDS]
-        times.append(times[-1] + weather.panel_duration(display.pages()[0], minimum=weather.PAGE_SECONDS))
+        for page in display.pages():
+            times.append(times[-1] + weather.panel_duration(page, font=weather._FONT, minimum=weather.PAGE_SECONDS))
         for index, elapsed in enumerate(times):
             with self.subTest(page=index):
                 image = display.render(elapsed, 0)
@@ -146,19 +151,20 @@ class WeatherTests(unittest.TestCase):
         display = weather.Weather(lambda: weather.parse_forecast(response_fixture(), CET),
                                   tz=CET, clock=lambda: NOW, start_worker=False)
         display.refresh()
-        long_card = ("OLD FEELS -120C / -184F", "WIND 100km/h")
-        next_card = ("TODAY HIGH", "-10C / 14F")
-        duration = weather.panel_duration(long_card, minimum=weather.PAGE_SECONDS)
+        long_card = ("WEATHER DATA UNAVAILABLE", "FREEZING RAIN")
+        next_card = ("HIGH -10C", "LOW -20C")
+        duration = weather.panel_duration(long_card, font=weather._FONT, minimum=weather.PAGE_SECONDS)
         self.assertGreater(duration, weather.PAGE_SECONDS)
         with patch("weather.forecast_pages", return_value=[long_card, next_card]), patch("weather.render_lines") as draw:
             display.render(weather.OVERVIEW_SECONDS + duration - 0.1, 0)
             self.assertEqual(draw.call_args.args[0], long_card)
             self.assertAlmostEqual(draw.call_args.args[1], duration - 0.1)
+            self.assertIs(draw.call_args.kwargs["font"], weather._FONT)
             display.render(weather.OVERVIEW_SECONDS + duration + 0.5, 0)
             self.assertEqual(draw.call_args.args[0], next_card)
             self.assertAlmostEqual(draw.call_args.args[1], 0.5)
 
-    def test_overview_shows_all_four_temperatures_and_rain_bars_together(self):
+    def test_overview_uses_two_readable_rows_with_all_four_celsius_temperatures(self):
         data = response_fixture()
         for hour, temperature, chance in ((8, -12, 0), (12, 3, 25), (16, 17, 50), (20, 7, 100)):
             data["hourly"]["temperature_2m"][hour] = temperature
@@ -166,25 +172,49 @@ class WeatherTests(unittest.TestCase):
         points = weather.overview_points(weather.parse_forecast(data, CET), NOW, CET)
         image = weather.render_overview(points)
         self.assertEqual((image.mode, image.size), ("1", (64, 16)))
-        for column, bar_height in enumerate((0, 1, 2, 4)):
+        for column in range(4):
             left = column * 16
-            self.assertIsNotNone(image.crop((left, 0, left + 16, 5)).getbbox())
-            self.assertIsNotNone(image.crop((left, 6, left + 16, 11)).getbbox())
-            for y in range(12, 16):
-                self.assertEqual(bool(image.getpixel((left + 6, y))), y >= 16 - bar_height)
+            top = image.crop((left, 0, left + 16, 8)).getbbox()
+            bottom = image.crop((left, 8, left + 16, 16)).getbbox()
+            self.assertEqual(top[3] - top[1], 7)
+            self.assertEqual(bottom[3] - bottom[1], 7)
         # A minus sign remains visible inside the first column without clipping.
-        self.assertTrue(any(image.getpixel((x, y)) for x in range(3) for y in range(6, 11)))
+        self.assertTrue(all(image.getpixel((x, 12)) for x in range(1, 4)))
+        for value in ("12C", "-12C", "--C"):
+            self.assertLessEqual(weather.textsize(value, weather._NUMERIC_FONT)[0], 16)
 
-    def test_missing_points_and_unknown_rain_are_visibly_different_from_dry(self):
+    def test_unknown_rain_is_explicit_in_hourly_cards_and_missing_temperatures_remain_visible(self):
         data = response_fixture()
         data["hourly"]["time"][12] = None
         data["hourly"]["precipitation_probability"][8] = 0
         points = weather.overview_points(weather.parse_forecast(data, CET), NOW, CET)
         self.assertIsNone(points[1][1])
         image = weather.render_overview(points)
-        self.assertIsNone(image.crop((0, 12, 16, 16)).getbbox())
-        self.assertIsNotNone(image.crop((16, 11, 32, 16)).getbbox())
-        self.assertIsNotNone(image.crop((16, 6, 32, 11)).getbbox())
+        self.assertIsNotNone(image.crop((16, 8, 32, 16)).getbbox())
+        pages = weather.forecast_pages(weather.parse_forecast(data, CET), NOW, CET)
+        self.assertIn(("RAIN 08H", "0% 0.8MM"), pages)
+        self.assertIn(("RAIN 12H", "--% --MM"), pages)
+
+    def test_overview_has_no_ambiguous_rain_bars(self):
+        data = response_fixture()
+        dry = weather.render_overview(weather.overview_points(weather.parse_forecast(data, CET), NOW, CET))
+        data["hourly"]["precipitation_probability"] = [100] * 48
+        wet = weather.render_overview(weather.overview_points(weather.parse_forecast(data, CET), NOW, CET))
+        self.assertEqual(dry.tobytes(), wet.tobytes())
+
+    def test_detail_font_fits_normal_labels_and_each_card_holds_at_least_six_seconds(self):
+        for label in ("NOW 12C", "FEELS -12C", "HIGH 13C", "LOW -12C", "RAIN TODAY",
+                      "100% 11.5MM", "RAIN 20H", "WIND 18KM/H"):
+            self.assertLessEqual(weather.textsize(label, weather._FONT)[0], 64, label)
+        self.assertGreaterEqual(weather.PAGE_SECONDS, 6)
+        display = weather.Weather(lambda: weather.parse_forecast(response_fixture(), CET),
+                                  tz=CET, clock=lambda: NOW, start_worker=False)
+        display.refresh()
+        with patch("weather.render_lines") as detail:
+            display.render(weather.OVERVIEW_SECONDS + 5.9, 0)
+            self.assertEqual(detail.call_args.args[0], display.pages()[0])
+            display.render(weather.OVERVIEW_SECONDS + 6.0, 0)
+            self.assertEqual(detail.call_args.args[0], display.pages()[1])
 
     def test_overview_stays_static_for_sixteen_seconds_before_detail_cards(self):
         display = weather.Weather(lambda: weather.parse_forecast(response_fixture(), CET),
@@ -193,7 +223,7 @@ class WeatherTests(unittest.TestCase):
         self.assertEqual(display.render(0, 0).tobytes(), display.render(15.9, 0).tobytes())
         with patch("weather.render_lines") as detail:
             display.render(weather.OVERVIEW_SECONDS, 0)
-            detail.assert_called_once_with(display.pages()[0], 0)
+            detail.assert_called_once_with(display.pages()[0], 0, font=weather._FONT)
 
     def test_fetch_uses_bounded_request_and_dst_safe_times(self):
         response = Mock()

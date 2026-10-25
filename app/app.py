@@ -29,7 +29,6 @@ MODE_GROUPS = {
 
 current_process = None
 active_script_name = "OFF" # Tracks which button should be green
-last_message = ""
 # Flask serves requests concurrently; display ownership must change atomically.
 switch_lock = threading.Lock()
 
@@ -88,13 +87,12 @@ def index():
     return controller_page()
 
 
-def controller_page(message_error=None, message_value=None):
+def controller_page(message_error=None, message_value=""):
     with switch_lock:
         selected_script = active_script_name
-        saved_message = last_message
     return render_template(
         "index.html", groups=MODE_GROUPS, active_script=selected_script,
-        message_value=saved_message if message_value is None else message_value,
+        message_value=message_value,
         message_error=message_error, max_message_length=MAX_MESSAGE_LENGTH,
     )
 
@@ -123,7 +121,6 @@ def run_script():
 
 @app.route("/message", methods=["POST"])
 def send_message():
-    global last_message
     value = request.form.get("message", "")
     try:
         message = validate_message(value)
@@ -132,7 +129,6 @@ def send_message():
     with switch_lock:
         # One argument also preserves messages beginning with '-' for argparse.
         switch_program("Message Board", ("--message=" + message,))
-        last_message = message
     return redirect("/#message")
 
 
