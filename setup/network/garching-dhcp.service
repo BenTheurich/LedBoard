@@ -1,0 +1,13 @@
+[Unit]
+Description=DHCP and DNS for garching-board Wi-Fi
+Requires=wpa_supplicant@wlan0.service
+After=wpa_supplicant@wlan0.service
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dhcpcd -B -q -t 0 -f /etc/dhcpcd-wlan0.conf wlan0
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

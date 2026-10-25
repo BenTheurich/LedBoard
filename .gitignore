@@ -1,0 +1,22 @@
+# Machine-specific access settings and diagnostics may contain secrets.
+.local/
+.env
+.env.*
+!.env.example
+id_*
+*.key
+*.log
+logs/
+work/
+
+# Python development, when the display application is added.
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Editors and OS files.
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

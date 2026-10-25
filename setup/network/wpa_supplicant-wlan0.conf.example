@@ -1,0 +1,33 @@
+# Reference only. Replace placeholders privately on the Pi; do not commit credentials.
+country=DE
+ctrl_interface=DIR=/run/wpa_supplicant GROUP=netdev
+update_config=0
+mac_addr=0
+preassoc_mac_addr=0
+
+network={
+    ssid="HHG-2.4GHz"
+    priority=100
+    proto=RSN
+    key_mgmt=WPA-EAP
+    pairwise=CCMP
+    group=CCMP
+    ieee80211w=0
+    eap=PEAP
+    identity="<HHG_IDENTITY>"
+    password="<HHG_PASSWORD>"
+    phase2="auth=MSCHAPV2"
+    ca_cert="/etc/NetworkManager/certs/hhg-ca.pem"
+    domain_match="hochschulhaus-garching.de"
+}
+
+network={
+    ssid="FBI Van"
+    priority=10
+    proto=RSN
+    key_mgmt=WPA-PSK
+    pairwise=CCMP
+    group=CCMP
+    ieee80211w=0
+    psk=<HOTSPOT_64_HEX_PSK>
+}
