@@ -1,12 +1,7 @@
 import subprocess
 import socket
-import time
+import threading
 from flask import Flask, render_template, request, redirect
-from luma.core.interface.serial import spi, noop
-from luma.led_matrix.device import max7219
-from luma.core.render import canvas
-from luma.core.legacy import text, textsize
-from luma.core.legacy.font import proportional, CP437_FONT
 
 app = Flask(__name__)
 
@@ -22,6 +17,8 @@ SCRIPTS = {
 
 current_process = None
 active_script_name = "OFF" # Tracks which button should be green
+# Flask serves requests concurrently; display ownership must change atomically.
+switch_lock = threading.Lock()
 
 # --- IP ADDRESS HELPERS ---
 def get_ip_address():
@@ -36,6 +33,12 @@ def get_ip_address():
     return ip
 
 def show_ip_on_matrix(ip_addr):
+    from luma.core.interface.serial import spi, noop
+    from luma.led_matrix.device import max7219
+    from luma.core.legacy import text, textsize
+    from luma.core.legacy.font import proportional, CP437_FONT
+    from display_utils import FramePacer, map_serpentine
+
     # (Hardware setup hidden to save space - exact same as before)
     serial = spi(port=0, device=0, gpio=noop())
     device = max7219(serial, cascaded=16, block_orientation=-90, rotate=0)
@@ -47,19 +50,15 @@ def show_ip_on_matrix(ip_addr):
     img = Image.new("1", (w + 128, 16), 0)
     draw = ImageDraw.Draw(img)
     text(draw, (64, 4), msg, fill="white", font=font)
+    pacer = FramePacer(50)
     for _ in range(2):
         for x in range(w + 128 - 64):
-            with canvas(device) as device_draw:
-                for i in range(64):
-                    for j in range(16):
-                        if img.getpixel((x + i, j)) > 0:
-                            phys_x = i; phys_y = j
-                            if j >= 8: phys_x = 64 + (63 - i); phys_y = 7 - (j - 8)
-                            if phys_x < 128: device_draw.point((phys_x, phys_y), fill="white")
-            time.sleep(0.02)
+            device.display(map_serpentine(img.crop((x, 0, x + 64, 16))))
+            pacer.wait()
 
 # --- FLASK ROUTES ---
 def kill_current_process():
+    # Called while switch_lock is held by the program-switch transaction.
     global current_process
     if current_process:
         current_process.terminate()
@@ -67,12 +66,15 @@ def kill_current_process():
             current_process.wait(timeout=2)
         except subprocess.TimeoutExpired:
             current_process.kill()
+            current_process.wait()
         current_process = None
 
 @app.route("/")
 def index():
     # Pass the active_script_name to the HTML
-    return render_template("index.html", scripts=SCRIPTS, active_script=active_script_name)
+    with switch_lock:
+        selected_script = active_script_name
+    return render_template("index.html", scripts=SCRIPTS, active_script=selected_script)
 
 @app.route("/run", methods=["POST"])
 def run_script():
@@ -82,15 +84,15 @@ def run_script():
     filename = SCRIPTS.get(script_name)
 
     if filename:
-        print(f"Switching to: {script_name}")
-        kill_current_process()
-        subprocess.run(["python3", "clear_screen.py"])
-        
-        # Update the active tracker
-        active_script_name = script_name
-        
-        if script_name != "OFF":
-            current_process = subprocess.Popen(["python3", filename])
+        with switch_lock:
+            print(f"Switching to: {script_name}")
+            kill_current_process()
+            active_script_name = "OFF"
+            subprocess.run(["python3", "clear_screen.py"])
+
+            if script_name != "OFF":
+                current_process = subprocess.Popen(["python3", filename])
+            active_script_name = script_name
             
     return redirect("/")
 

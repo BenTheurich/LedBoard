@@ -4,7 +4,7 @@ A wall-mounted transit departure display for Garching, built with a Raspberry Pi
 
 ## Project status
 
-The board is assembled and running. Its existing Flask controller, display programs, and HTML template were copied from the Pi on 2026-10-25, with source-file hashes checked during transfer. Ben reports that all programs work. This repository preserves that application without changing the files or processes running on the Pi.
+The board is assembled and running. Its Flask controller, display programs, and HTML template were imported from the Pi on 2026-10-25, with source-file hashes checked during transfer. The current code adds serialized program switching, faster pixel mapping, paced animation frames, and a clock that redraws only when the displayed second changes. The original import remains recorded in [pi-app-snapshot.json](docs/pi-app-snapshot.json) and Git commit `88a40b9`.
 
 Open the [controller](http://garching-board.local:5000/) on the local network. If local hostname discovery is unavailable, the controller is also reachable at `http://100.111.233.84:5000/` while connected to the same Tailscale network. It starts through the existing cron `@reboot` entry.
 
@@ -55,7 +55,7 @@ The helper uses SSH user `ben`, address `100.111.233.84`, and host-key alias `ga
 
 ## Repository contents
 
-- `app/`: the existing controller, six selected display programs, and `templates/index.html`, imported without source edits.
+- `app/`: the controller, six display programs, shared pixel-mapping/timing helpers, and `templates/index.html`.
 - `requirements.txt`: observed versions of the application's direct Python dependencies; native Pi dependencies are documented separately.
 - `docs/application.md`: runtime versions, working-directory requirements, and the existing cron startup.
 - `docs/pi-app-snapshot.json`: import timestamp, source paths, and SHA-256 hashes for the eight imported files.
@@ -64,8 +64,16 @@ The helper uses SSH user `ben`, address `100.111.233.84`, and host-key alias `ga
 - `setup/network/`: credential-free reference files for the installed Wi-Fi stack. These are not an automatic installer.
 - `docs/pi-setup.md`: device details, setup decisions, verification results, and recovery locations.
 
+## Tests
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The tests require Flask, Pillow, and luma.core, and run without initializing GPIO or SPI. They verify concurrent switching, child cleanup, the pixel mapping, frame pacing, and clock redraws. See [application documentation](docs/application.md) for a desktop test environment and deployment notes.
+
 ## Possible next work
 
-The hardware setup, pixel mapping, bus fetching, rendering, and controller startup already exist. Further work can focus on measured animation performance, optional U6 departures, and clearer handling of transit-data failures. Moving startup from cron to systemd would be an optional operational change.
+The hardware setup, pixel mapping, bus fetching, rendering, and controller startup already exist. Further work can focus on optional U6 departures and clearer handling of transit-data failures. Moving startup from cron to systemd would be an optional operational change.
 
 The older Mbed `EmbeddedSnakeGame` project found on this PC is separate; its firmware has not been imported here.

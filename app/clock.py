@@ -1,87 +1,50 @@
-import time
 import datetime
+import time
+
 from PIL import Image, ImageDraw
-from luma.core.interface.serial import spi, noop
-from luma.led_matrix.device import max7219
-from luma.core.render import canvas
-from luma.core.legacy import text, textsize
-from luma.core.legacy.font import proportional, CP437_FONT
 
-# --- HARDWARE SETUP ---
-serial = spi(port=0, device=0, gpio=noop())
-# 16 Matrices (Standard 128x8 physical strip, folded to 64x16)
-device = max7219(serial, cascaded=16, block_orientation=-90, rotate=0)
-device.contrast(32)
+from display_utils import map_serpentine
 
-# --- LOGICAL DIMENSIONS ---
-WIDTH = 64
-HEIGHT = 16
 
-def render_serpentine(device_draw, source_img):
-    """
-    Maps the 64x16 virtual image to your 16x64 Serpentine Layout.
-    """
-    for x in range(WIDTH):
-        for y in range(HEIGHT):
-            if source_img.getpixel((x, y)) > 0:
-                
-                phys_x = x
-                phys_y = y
-                
-                # --- MAPPING LOGIC ---
-                # Top Row: Standard (y 0-7)
-                if y < 8:
-                    phys_x = x
-                    phys_y = y
-                    
-                # Bottom Row: Serpentine & Flipped (y 8-15)
-                elif y >= 8:
-                    # 1. Reverse X (Right -> Left flow)
-                    phys_x = 64 + (63 - x)
-                    # 2. Reverse Y (Upside down board)
-                    phys_y = 7 - (y - 8)
+def render_clock_image(time_str, font):
+    """Preserve the original stretched clock font and centering."""
+    from luma.core.legacy import text, textsize
 
-                if phys_x < 128:
-                    device_draw.point((phys_x, phys_y), fill="white")
+    width, _ = textsize(time_str, font)
+    tiny = Image.new("1", (width, 8), 0)
+    text(ImageDraw.Draw(tiny), (0, 0), time_str, fill="white", font=font)
+    stretched = tiny.resize((width, 16), resample=Image.Resampling.NEAREST)
+    image = Image.new("1", (64, 16), 0)
+    image.paste(stretched, ((64 - width) // 2, 0))
+    return image
 
-# --- MAIN LOOP ---
-print("Starting Stretch Clock...")
 
-try:
-    font = proportional(CP437_FONT)
-
+def run_clock(device, font):
+    last_text = None
     while True:
-        now = datetime.datetime.now()
-        time_str = now.strftime("%H:%M:%S")
+        time_str = datetime.datetime.now().strftime("%H:%M:%S")
+        if time_str != last_text:
+            device.display(map_serpentine(render_clock_image(time_str, font)))
+            last_text = time_str
+        # Calculate after rendering so its duration does not shift the next tick.
+        time.sleep(max(0.001, 1.0 - time.time() % 1.0))
 
-        # 1. Measure the text
-        w, h = textsize(time_str, font)
-        
-        # 2. Create a tiny image just for the text (standard 8px high)
-        # We add a little padding to width to be safe
-        tiny_img = Image.new("1", (w, 8), 0)
-        tiny_draw = ImageDraw.Draw(tiny_img)
-        text(tiny_draw, (0, 0), time_str, fill="white", font=font)
 
-        # 3. THE TRICK: STRETCH IT
-        # We resize the 8px high image to 16px high using "Nearest Neighbor"
-        # This keeps the sharp pixel look but makes it tall.
-        stretched_img = tiny_img.resize((w, 16), resample=Image.NEAREST)
+def main():
+    # Keep hardware initialization out of imports used by desktop tests.
+    from luma.core.interface.serial import spi, noop
+    from luma.core.legacy.font import proportional, CP437_FONT
+    from luma.led_matrix.device import max7219
 
-        # 4. Paste it into the center of our main canvas
-        main_img = Image.new("1", (WIDTH, HEIGHT), 0)
-        
-        # Calculate X center
-        x_pos = (WIDTH - w) // 2
-        # Y pos is 0 because we filled the whole 16px height
-        main_img.paste(stretched_img, (x_pos, 0))
-        
-        # 5. Render
-        with canvas(device) as device_draw:
-            render_serpentine(device_draw, main_img)
-            
-        time.sleep(0.05)
+    serial = spi(port=0, device=0, gpio=noop())
+    device = max7219(serial, cascaded=16, block_orientation=-90, rotate=0)
+    device.contrast(32)
+    print("Starting Stretch Clock...")
+    try:
+        run_clock(device, proportional(CP437_FONT))
+    except KeyboardInterrupt:
+        device.clear()
 
-except KeyboardInterrupt:
-    with canvas(device) as draw:
-        pass
+
+if __name__ == "__main__":
+    main()

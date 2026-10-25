@@ -1,6 +1,6 @@
 # Application dependencies and startup
 
-The application in `app/` was copied from the working Pi on 2026-10-25. No source edits were made during import. The eight copied files are listed with their SHA-256 hashes in [pi-app-snapshot.json](pi-app-snapshot.json). Earlier experiments and alternate program versions elsewhere in `/home/ben` were left on the Pi.
+The application in `app/` was copied from the working Pi on 2026-10-25. Git commit `88a40b9` preserves the unmodified import; [pi-app-snapshot.json](pi-app-snapshot.json) records those original eight source-file hashes, not the hashes of later revisions. Earlier experiments and alternate program versions elsewhere in `/home/ben` remain separate from the selected application.
 
 ## Layout and execution
 
@@ -13,7 +13,7 @@ cd /path/to/garching-board/app
 python3 app.py
 ```
 
-This is a reference command, not a deployment step performed during import. Do not start a second controller or display program while another process owns the matrices. Importing these modules can initialize SPI and write to the display, so they must not be imported for an ordinary desktop syntax check.
+Do not start a second controller or display program while another process owns the matrices. The controller and clock now defer hardware initialization until execution so tests can import them safely. Other display programs still initialize SPI at import and must not be imported for an ordinary desktop syntax check.
 
 The controller binds to `0.0.0.0:5000` with Flask debug mode disabled. At startup it tries to scroll its local IP address on the display. It then starts the web controller with the selected-program indicator set to OFF; there is no saved-mode restoration in the imported code. The page's `/run` POST route switches display programs.
 
@@ -29,7 +29,43 @@ Ben's user crontab contains:
 
 The relative child-script paths rely on the controller running from `/home/ben`, the user's home directory used by cron. The log is `/home/ben/flask_log.txt`. The running controller was observed in the `cron.service` process group. This startup provides a boot launch; the entry does not configure automatic restarts after a controller crash or log rotation.
 
-For a future deployment at another path, update the working directory and startup entry together. Migrating to systemd is optional and has not been performed. The GitHub push updates source control only; the Pi continues running its original `/home/ben` files.
+For a future deployment at another path, update the working directory and startup entry together. Migrating to systemd is optional and has not been performed. A GitHub push does not deploy the application: deployment is a separate operation replacing the selected files under `/home/ben` and restarting the controller from that directory.
+
+## Rendering and switching
+
+Program switches hold a lock across child termination, clearing, spawning, and selection-state updates. If a child ignores termination, it is killed and reaped before another program starts. This prevents overlapping requests from leaving multiple programs driving the display.
+
+`display_utils.map_serpentine` uses Pillow crop, rotation, and paste operations instead of Python per-pixel loops. The visualizer, clock, bus scroll, and startup IP message share it. Pong's sparse point drawing is retained.
+
+Visualizer and Pong target 25 frames per second with a monotonic deadline that includes rendering and SPI time. An overrun resets the schedule without a burst of catch-up frames. The animations still advance one step per rendered frame, so they can slow down if the Pi cannot sustain the target rate. The clock keeps its original stretched font and layout but writes only when `HH:MM:SS` changes, sleeping until the next wall-clock second.
+
+## Hardware-free tests
+
+On the prepared Pi, the existing dependencies support:
+
+```bash
+python3 -B -m unittest discover -s tests -v
+```
+
+For a desktop test environment, install only the pure dependencies used by the tests. Avoid pulling GPIO drivers into a Windows environment:
+
+```bash
+python -m venv .local/test-venv
+# Activate the environment using your shell's normal activation command.
+python -m pip install Flask==3.1.1 Pillow==11.1.0
+python -m pip install --no-deps luma.core==2.4.2
+python -m unittest discover -s tests -v
+```
+
+The suite compares the bulk mapping with the original pixel loop, checks every logical pixel's location, verifies pacing through a fake clock, checks clock image equivalence and second-change redraws, and exercises concurrent Flask requests with fake subprocesses.
+
+## Deployment and recovery
+
+Deployments keep the existing flat `/home/ben` layout and cron entry. Stage the release and run its tests before stopping the current controller. Save the current selection and back up every file being replaced, recording whether newly added helpers were previously absent. Backup directories use `/home/ben/.garching-board/backups/<timestamp>-<commit>/`.
+
+Stop the selected program through the controller, stop the identified controller process, replace the prepared files, and restart `/usr/bin/python3 /home/ben/app.py` with `/home/ben` as its working directory and output appended to `flask_log.txt`. Verify HTTP access, single-child switching, all display modes, and restore the saved selection after testing. Wi-Fi and cron settings do not need to change.
+
+If verification fails, stop the new controller and its display child, restore the backed-up files, remove only helpers recorded as previously absent, and restart the backed-up controller with the saved selection. Keep release hashes and test results with the backup so the deployed revision can be identified.
 
 ## Observed runtime
 

@@ -1,9 +1,8 @@
-import time
 import random
 from PIL import Image, ImageDraw
 from luma.core.interface.serial import spi, noop
 from luma.led_matrix.device import max7219
-from luma.core.render import canvas
+from display_utils import FramePacer, map_serpentine
 
 # --- HARDWARE SETUP ---
 serial = spi(port=0, device=0, gpio=noop())
@@ -14,35 +13,6 @@ device.contrast(16)
 # --- LOGICAL DIMENSIONS ---
 WIDTH = 64
 HEIGHT = 16 
-
-# --- RENDERER ---
-def render_serpentine(device_draw, source_img):
-    """
-    Maps the 64x16 virtual image to your 16x64 Serpentine Layout.
-    """
-    for x in range(WIDTH):
-        for y in range(HEIGHT):
-            # Check pixel in virtual image
-            if source_img.getpixel((x, y)) > 0:
-                
-                phys_x = x
-                phys_y = y
-                
-                # --- MAPPING LOGIC ---
-                # Top Row: Standard (y 0-7)
-                if y < 8:
-                    phys_x = x
-                    phys_y = y
-                    
-                # Bottom Row: Serpentine & Flipped (y 8-15)
-                elif y >= 8:
-                    # 1. Reverse X (Right -> Left flow)
-                    phys_x = 64 + (63 - x)
-                    # 2. Reverse Y (Upside down board)
-                    phys_y = 7 - (y - 8)
-
-                if phys_x < 128:
-                    device_draw.point((phys_x, phys_y), fill="white")
 
 # --- ANIMATION 1: MATRIX RAIN ---
 class MatrixRain:
@@ -129,6 +99,7 @@ mode = AudioSpectrum()
 # mode = MatrixRain()
 
 print("Starting Visualizer...")
+pacer = FramePacer(25)
 
 try:
     while True:
@@ -142,10 +113,8 @@ try:
         mode.draw(draw)
         
         # 3. Map virtual image to physical hardware
-        with canvas(device) as device_draw:
-            render_serpentine(device_draw, img)
-            
-        time.sleep(0.04)
+        device.display(map_serpentine(img))
+        pacer.wait()
 
 except KeyboardInterrupt:
     pass

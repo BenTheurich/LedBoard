@@ -4,6 +4,7 @@ from PIL import Image, ImageDraw
 from luma.core.interface.serial import spi, noop
 from luma.led_matrix.device import max7219
 from luma.core.render import canvas
+from display_utils import FramePacer
 
 # --- HARDWARE SETUP ---
 serial = spi(port=0, device=0, gpio=noop())
@@ -215,13 +216,14 @@ class PongPhysics:
 # --- MAIN LOOP ---
 game = PongPhysics()
 print("Starting Physics Pong...")
+pacer = FramePacer(25)
 
 try:
     while True:
         game.update()
         with canvas(device) as draw:
             game.render_serpentine(draw)
-        time.sleep(0.04) 
+        pacer.wait()
 
 except KeyboardInterrupt:
     pass

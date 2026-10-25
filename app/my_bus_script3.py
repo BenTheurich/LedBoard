@@ -3,10 +3,10 @@ from datetime import datetime
 from mvg import MvgApi
 from luma.core.interface.serial import spi, noop
 from luma.led_matrix.device import max7219
-from luma.core.render import canvas
 from luma.core.legacy import text, textsize
 from luma.core.legacy.font import proportional, CP437_FONT
 from PIL import Image, ImageDraw
+from display_utils import map_serpentine
 
 # --- CONFIGURATION ---
 SEARCH_NAME = "Garching, Untere Straßäcker"
@@ -154,38 +154,10 @@ def create_tall_scroll_image(bus_list):
         
     return master_img, virtual_height
 
-def render_serpentine_window(device_draw, source_img, scroll_y):
-    """
-    Cuts a 16px high slice from source_img and maps it to your hardware.
-    """
-    for x in range(WIDTH):
-        for y in range(HEIGHT): # 0 to 15
-            
-            # Calculate where in the tall image to look
-            source_y = y + scroll_y
-            
-            # Boundary check
-            if source_y < source_img.height:
-                pixel = source_img.getpixel((x, source_y))
-            else:
-                pixel = 0
-
-            if pixel > 0:
-                phys_x = x
-                phys_y = y
-                
-                # --- SERPENTINE MAPPING ---
-                # Top Row (Standard)
-                if y < 8:
-                    phys_x = x
-                    phys_y = y
-                # Bottom Row (Flipped & Reversed)
-                elif y >= 8:
-                    phys_x = 64 + (63 - x)
-                    phys_y = 7 - (y - 8)
-
-                if phys_x < 128:
-                    device_draw.point((phys_x, phys_y), fill="white")
+def show_window(source_img, scroll_y):
+    """Crop the visible rows and send the folded image to the matrix chain."""
+    window = source_img.crop((0, scroll_y, WIDTH, scroll_y + HEIGHT))
+    device.display(map_serpentine(window))
 
 def run_vertical_scroll(bus_list):
     """Handles the Scroll Down -> Scroll Up logic."""
@@ -200,8 +172,7 @@ def run_vertical_scroll(bus_list):
     
     # 2. SCROLL DOWN
     for y in range(0, max_scroll + 1):
-        with canvas(device) as draw:
-            render_serpentine_window(draw, tall_image, y)
+        show_window(tall_image, y)
         
         if y == 0:
             time.sleep(PAUSE_AT_ENDS)
@@ -213,8 +184,7 @@ def run_vertical_scroll(bus_list):
     
     # 3. SCROLL UP
     for y in range(max_scroll, -1, -1):
-        with canvas(device) as draw:
-            render_serpentine_window(draw, tall_image, y)
+        show_window(tall_image, y)
         time.sleep(SCROLL_SPEED)
 
 # --- MAIN LOOP ---
