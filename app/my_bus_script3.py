@@ -18,7 +18,7 @@ HOUR_NIGHT_START = 20
 
 # --- ANIMATION SETTINGS ---
 SCROLL_SPEED = 0.02    # Speed of the slide
-PAUSE_AT_ROWS = 10.0   # Reading time at each complete two-row view
+PAUSE_AT_ROWS = 10.0   # Reading time while advancing through departures
 
 # --- HARDWARE ---
 device = None  # Initialized only when this script runs on the Pi.
@@ -157,7 +157,7 @@ def show_window(source_img, scroll_y):
     device.display(map_serpentine(window))
 
 def run_vertical_scroll(bus_list):
-    """Pause at every complete pair so middle departures remain readable."""
+    """Pause through the departures, then reset to the top without row stops."""
     
     # 1. Create the tall image containing all buses
     tall_image, tall_height = create_tall_scroll_image(bus_list)
@@ -174,11 +174,11 @@ def run_vertical_scroll(bus_list):
         time.sleep(PAUSE_AT_ROWS if y % ROW_HEIGHT == 0 else SCROLL_SPEED)
     
     # 3. SCROLL UP
-    # The bottom already paused; return to the top before fetching fresh data.
+    # The return is a continuous reset; reading pauses belong only to the first pass.
     for y in range(max_scroll - 1, -1, -1):
         show_window(tall_image, y)
         if y > 0:
-            time.sleep(PAUSE_AT_ROWS if y % ROW_HEIGHT == 0 else SCROLL_SPEED)
+            time.sleep(SCROLL_SPEED)
 
 def main():
     global device

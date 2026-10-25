@@ -13,12 +13,14 @@ class BusScrollTests(unittest.TestCase):
     def observed_scroll(self, count):
         held_pairs = []
         offsets = []
+        self.waits = []
         image = Image.new("1", (64, max(2, count) * 8))
 
         def show(_, offset):
             offsets.append(offset)
 
         def sleep(seconds):
+            self.waits.append((offsets[-1], seconds))
             if seconds == bus.PAUSE_AT_ROWS:
                 offset = offsets[-1]
                 self.assertEqual(offset % 8, 0)
@@ -33,15 +35,23 @@ class BusScrollTests(unittest.TestCase):
         self.assertEqual(offsets[0], 0)
         self.assertEqual(offsets[-1], 0)
         self.assertTrue(all(0 <= offset <= image.height - 16 for offset in offsets))
+        self.offsets = offsets
         return held_pairs
 
-    def test_middle_pair_pauses_on_the_way_down_and_back_up(self):
-        self.assertEqual(self.observed_scroll(4), [(1, 2), (2, 3), (3, 4), (2, 3)])
+    def test_middle_pair_pauses_when_advancing_through_departures(self):
+        self.assertEqual(self.observed_scroll(4), [(1, 2), (2, 3), (3, 4)])
 
     def test_long_list_holds_every_pair_without_repeating_the_endpoints(self):
         held = self.observed_scroll(8)
-        self.assertEqual(held[:7], [(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8)])
-        self.assertEqual(held[7:], [(6, 7), (5, 6), (4, 5), (3, 4), (2, 3)])
+        self.assertEqual(held, [(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8)])
+
+    def test_return_from_bottom_to_top_is_a_continuous_sweep(self):
+        self.observed_scroll(8)
+        bottom_frame = self.offsets.index(48)
+        self.assertEqual(self.offsets[bottom_frame + 1:], list(range(47, -1, -1)))
+        bottom_pause = self.waits.index((48, bus.PAUSE_AT_ROWS))
+        return_waits = self.waits[bottom_pause + 1:]
+        self.assertEqual(return_waits, [(offset, bus.SCROLL_SPEED) for offset in range(47, 0, -1)])
 
     def test_short_or_empty_lists_hold_one_still_page(self):
         for count in (0, 1, 2):
