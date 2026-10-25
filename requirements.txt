@@ -1,0 +1,8 @@
+# Direct application dependency versions observed on the Pi on 2026-10-25.
+# Inventory only: see docs/application.md for the mixed Debian/Python environment
+# and native ARMv6 GPIO/SPI dependencies. This is not a complete lockfile.
+Flask==3.1.1
+luma.core==2.4.2
+luma.led-matrix==1.7.0
+Pillow==11.1.0
+mvg==1.6.0

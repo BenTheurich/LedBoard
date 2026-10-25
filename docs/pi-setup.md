@@ -85,6 +85,10 @@ The saved rollback script changes live network ownership and can interrupt SSH. 
 
 The original Windows troubleshooting scripts and diagnostics remain in the previous chat workspace under `work/wifi-diagnostics`. The old key location is needed by this checkout until access is deliberately migrated to another protected location. Do not delete that workspace merely because this repository now exists.
 
-## Display work remaining
+## Existing display application
 
-No wiring, GPIO assignments, SPI availability, matrix orientation, transit API, or stop identifiers have been verified for the display implementation. Confirm these before driving hardware or hardcoding the layout. The project has no display application, dependency manifest, or display startup service yet.
+The application was subsequently found under `/home/ben` and imported into this repository's `app/` directory on 2026-10-25. Ben confirms that the board and its programs work. The controller uses Flask on port 5000 and launches Clock, Game of Life, Bus Timetable, Pong, Music Visualizer, or the clear-screen program. The selected sources already configure SPI, sixteen MAX7219 devices, and the 64×16 pixel mapping.
+
+An existing user-crontab `@reboot` entry starts `/home/ben/app.py`; it is not a display systemd service. No Pi files, processes, or startup settings were changed during the import. See [application dependencies and startup](application.md) for the exact entry, installed dependency versions, and source snapshot details.
+
+The selected bus program already fetches departures for Untere Straßäcker. U6 departures remain an optional addition against the original project goal. The earlier assumption that hardware setup and display software still needed to be implemented was incorrect.

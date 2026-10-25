@@ -4,9 +4,11 @@ A wall-mounted transit departure display for Garching, built with a Raspberry Pi
 
 ## Project status
 
-The Pi's network setup is complete. It prefers HHG Wi-Fi, falls back to the phone hotspot, and is reachable through Tailscale. HHG access, hotspot fallback, and reconnection after reboot passed during the preceding setup session. The setup state was recorded on 2026-10-25; see [Pi setup](docs/pi-setup.md).
+The board is assembled and running. Its existing Flask controller, display programs, and HTML template were copied from the Pi on 2026-10-25, with source-file hashes checked during transfer. Ben reports that all programs work. This repository preserves that application without changing the files or processes running on the Pi.
 
-Display software has not been added to this repository. Matrix wiring, chain order, orientation, SPI availability, and the transit data source still need to be checked before implementing the display.
+Open the [controller](http://garching-board.local:5000/) on the local network. If local hostname discovery is unavailable, the controller is also reachable at `http://100.111.233.84:5000/` while connected to the same Tailscale network. It starts through the existing cron `@reboot` entry.
+
+Wi-Fi prefers HHG and falls back to the phone hotspot. HHG access, hotspot fallback, and reconnection after reboot passed during the network setup session. See [Pi setup](docs/pi-setup.md) and [application dependencies and startup](docs/application.md).
 
 ## Hardware and intended display
 
@@ -16,7 +18,20 @@ Display software has not been added to this repository. Matrix wiring, chain ord
 - Four Hailege MAX7219 4-in-1 boards: sixteen 8×8 matrices, intended to form a 64×16 display.
 - Dupont jumper cables.
 
-The intended content is departures for buses **292** and **X205** at **Untere Straßäcker**, plus the **U6** at **Garching-Forschungszentrum**. Directions, walking-time cutoffs, and the screen layout have not been decided.
+The installed programs use SPI bus 0, device 0, with `cascaded=16`, `block_orientation=-90`, and `rotate=0`. They map a logical 64×16 image to the physical 128×8 chain, reversing both axes for the lower row.
+
+## Existing programs
+
+| Controller button | Source | Behavior |
+| --- | --- | --- |
+| Clock | [clock.py](app/clock.py) | Stretched hours, minutes, and seconds |
+| Game of Life | [game_of_life.py](app/game_of_life.py) | Cellular automaton |
+| Bus Timetable | [my_bus_script3.py](app/my_bus_script3.py) | Two-row scrolling departures with day/night brightness |
+| Pong | [pong_explode2.py](app/pong_explode2.py) | Animated Pong with particle effects |
+| Music Visualizer | [visualizations.py](app/visualizations.py) | Simulated spectrum bars; no audio input |
+| TURN OFF | [clear_screen.py](app/clear_screen.py) | Clears the matrix |
+
+The bus program queries MVG through the Python `mvg` package for **Garching, Untere Straßäcker**, filtering lines **230**, **292**, and **X205** toward **Forschungszentrum**. It displays X205 as `205`. U6 departures at Garching-Forschungszentrum were part of the original goal and are not implemented in this selected program.
 
 ## Run a network check from Windows
 
@@ -40,17 +55,17 @@ The helper uses SSH user `ben`, address `100.111.233.84`, and host-key alias `ga
 
 ## Repository contents
 
+- `app/`: the existing controller, six selected display programs, and `templates/index.html`, imported without source edits.
+- `requirements.txt`: observed versions of the application's direct Python dependencies; native Pi dependencies are documented separately.
+- `docs/application.md`: runtime versions, working-directory requirements, and the existing cron startup.
+- `docs/pi-app-snapshot.json`: import timestamp, source paths, and SHA-256 hashes for the eight imported files.
 - `scripts/Invoke-Pi.ps1`: SSH helper adapted from the Wi-Fi setup session, with configurable local key paths and strict host-key checking.
 - `scripts/pi/check-network.sh`: read-only check adapted from the final persistent Wi-Fi verification script.
 - `setup/network/`: credential-free reference files for the installed Wi-Fi stack. These are not an automatic installer.
 - `docs/pi-setup.md`: device details, setup decisions, verification results, and recovery locations.
 
-## Next work
+## Possible next work
 
-1. Confirm the physical wiring, power distribution, board arrangement, and chain order.
-2. Check SPI and choose a display library that works on ARMv6.
-3. Test a small pattern at low brightness and establish the 64×16 pixel mapping.
-4. Verify stop identifiers and a suitable transit data source, then implement fetching and rendering.
-5. Add startup through systemd and display behavior for stale or unavailable data.
+The hardware setup, pixel mapping, bus fetching, rendering, and controller startup already exist. Further work can focus on measured animation performance, optional U6 departures, and clearer handling of transit-data failures. Moving startup from cron to systemd would be an optional operational change.
 
 The older Mbed `EmbeddedSnakeGame` project found on this PC is separate; its firmware has not been imported here.

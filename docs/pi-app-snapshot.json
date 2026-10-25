@@ -1,0 +1,47 @@
+{
+  "captured_at": "2026-10-25T13:31:27.569574+01:00",
+  "source_root": "/home/ben",
+  "repository_root": "app/",
+  "files": [
+    {
+      "path": "app.py",
+      "size": 3227,
+      "sha256": "ed5a4f19eafb0897fa218060af1454315c5c669bf330ee45ff7326ff33c412e1"
+    },
+    {
+      "path": "clock.py",
+      "size": 2813,
+      "sha256": "e07783392e3e8b4943eda8cbf43090fd2df677b426716db4680fb26df7c56cc1"
+    },
+    {
+      "path": "game_of_life.py",
+      "size": 4745,
+      "sha256": "5eb736c83482b27616bcfaf029db6182fa15d9ce4777fa62d84996893177fb46"
+    },
+    {
+      "path": "my_bus_script3.py",
+      "size": 7249,
+      "sha256": "15686ece97bf93dd56be8a0dc86c8788cbe9aac65ed9d86c2d49676647991139"
+    },
+    {
+      "path": "pong_explode2.py",
+      "size": 7588,
+      "sha256": "f45e812bc4f823aef0a202513d3540a7e03a55508d418b8185be42cd6f4e97db"
+    },
+    {
+      "path": "visualizations.py",
+      "size": 4497,
+      "sha256": "dbea4293ac37b562afbf731d045c92cb3dc1f2b5fdfb103256f782cb2b802e33"
+    },
+    {
+      "path": "clear_screen.py",
+      "size": 360,
+      "sha256": "67d6e740ad7f5253fbd6508cfe8f338b790fd7098808a6bafdbc72cb163e2f73"
+    },
+    {
+      "path": "templates/index.html",
+      "size": 3661,
+      "sha256": "779a05399375aace45d350051b38a421ed5ede6bfaa3d9da2db32f52c9e587fb"
+    }
+  ]
+}

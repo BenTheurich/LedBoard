@@ -1,0 +1,236 @@
+import time
+from datetime import datetime
+from mvg import MvgApi
+from luma.core.interface.serial import spi, noop
+from luma.led_matrix.device import max7219
+from luma.core.render import canvas
+from luma.core.legacy import text, textsize
+from luma.core.legacy.font import proportional, CP437_FONT
+from PIL import Image, ImageDraw
+
+# --- CONFIGURATION ---
+SEARCH_NAME = "Garching, Untere Straßäcker"
+TARGET_DEST = "Forschungszentrum"
+TARGET_LINES = ["230", "292", "X205"]
+
+# --- BRIGHTNESS SETTINGS ---
+BRIGHTNESS_DAY = 32   
+BRIGHTNESS_NIGHT = 10 
+HOUR_DAY_START = 7    
+HOUR_NIGHT_START = 20 
+
+# --- ANIMATION SETTINGS ---
+SCROLL_SPEED = 0.02    # Speed of the slide
+PAUSE_AT_ENDS = 10.0    # Wait time at top/bottom
+
+# --- HARDWARE ---
+serial = spi(port=0, device=0, gpio=noop())
+# UPDATED: cascaded=16 for your full 16x64 setup
+device = max7219(serial, cascaded=16, block_orientation=-90, rotate=0)
+device.contrast(BRIGHTNESS_DAY)
+
+# Logical Dimensions
+WIDTH = 64
+HEIGHT = 16  # We now show 2 rows (16 pixels) at once
+
+found_station_id = None 
+
+# --- HELPER FUNCTIONS ---
+
+def check_brightness():
+    now = datetime.now()
+    if HOUR_DAY_START <= now.hour < HOUR_NIGHT_START:
+        device.contrast(BRIGHTNESS_DAY)
+    else:
+        device.contrast(BRIGHTNESS_NIGHT)
+
+def get_departures():
+    global found_station_id
+    try:
+        if found_station_id is None:
+            print(f"Searching for '{SEARCH_NAME}'...")
+            station = MvgApi.station(SEARCH_NAME)
+            if station:
+                found_station_id = station['id']
+            else:
+                return []
+
+        mvg_station = MvgApi(found_station_id)
+        departures = mvg_station.departures()
+        
+        next_busses = []
+        now_ts = time.time()
+        
+        for dep in departures:
+            line_name = dep.get('line')       
+            destination = dep.get('destination', '')
+            timestamp = dep.get('time', 0)    
+            
+            if (line_name in TARGET_LINES and 
+                TARGET_DEST.lower() in destination.lower()):
+                
+                minutes = int((timestamp - now_ts) / 60)
+                if minutes < 0: continue 
+                
+                # Symmetry Fix: Rename X205 to 205
+                display_name = line_name
+                if display_name == "X205":
+                    display_name = "205"
+                
+                time_str = f"{minutes}m"
+                next_busses.append((f"{display_name}:", time_str))
+                
+                # Limit to 8 buses (enough to scroll nicely)
+                if len(next_busses) >= 8: 
+                    break
+                    
+        return next_busses
+
+    except Exception as e:
+        print(f"API Error: {e}")
+        found_station_id = None 
+        return []
+
+def render_bus_image(bus_data):
+    """Creates a static 64x8 image for a single bus with DOTS."""
+    font = proportional(CP437_FONT)
+    img = Image.new("1", (64, 8))
+    draw = ImageDraw.Draw(img)
+    
+    # Handle "No Bus" or simple messages
+    if isinstance(bus_data, str):
+        text_to_show = bus_data
+        w, h = textsize(text_to_show, font=font)
+        x_pos = (64 - w) // 2 
+        text(draw, (x_pos, 0), text_to_show, fill="white", font=font)
+        return img
+
+    label, minutes_str = bus_data
+    
+    # 1. Draw Name (Left)
+    text(draw, (0, 0), label, fill="white", font=font)
+    w_label, h = textsize(label, font=font)
+    
+    # 2. Draw Time (Right)
+    w_time, h = textsize(minutes_str, font=font)
+    x_time = 64 - w_time
+    text(draw, (x_time, 0), minutes_str, fill="white", font=font)
+    
+    # 3. Draw The Dots
+    # Start after the label, end before the time
+    dot_start = w_label + 3
+    dot_end = x_time - 3
+    
+    # Draw a pixel every 3 steps at y=6 (near the baseline)
+    if dot_end > dot_start:
+        for x in range(dot_start, dot_end, 3):
+            draw.point((x, 6), fill="white")
+            
+    return img
+
+def create_tall_scroll_image(bus_list):
+    """
+    Stitches multiple 64x8 bus images into one tall vertical image.
+    """
+    # Ensure at least 2 lines so screen isn't half empty
+    if not bus_list:
+        bus_list = ["No Bus Found", ""]
+    elif len(bus_list) == 1:
+        bus_list.append("") # Pad with empty line if only 1 bus
+        
+    num_lines = len(bus_list)
+    virtual_height = num_lines * 8
+    
+    # Create the tall canvas
+    master_img = Image.new("1", (WIDTH, virtual_height), 0)
+    
+    for i, bus_data in enumerate(bus_list):
+        # Generate the single line image (with dots etc)
+        line_img = render_bus_image(bus_data)
+        
+        # Paste it into the master image at the correct Y offset
+        # Line 0 goes at y=0, Line 1 goes at y=8, etc.
+        master_img.paste(line_img, (0, i * 8))
+        
+    return master_img, virtual_height
+
+def render_serpentine_window(device_draw, source_img, scroll_y):
+    """
+    Cuts a 16px high slice from source_img and maps it to your hardware.
+    """
+    for x in range(WIDTH):
+        for y in range(HEIGHT): # 0 to 15
+            
+            # Calculate where in the tall image to look
+            source_y = y + scroll_y
+            
+            # Boundary check
+            if source_y < source_img.height:
+                pixel = source_img.getpixel((x, source_y))
+            else:
+                pixel = 0
+
+            if pixel > 0:
+                phys_x = x
+                phys_y = y
+                
+                # --- SERPENTINE MAPPING ---
+                # Top Row (Standard)
+                if y < 8:
+                    phys_x = x
+                    phys_y = y
+                # Bottom Row (Flipped & Reversed)
+                elif y >= 8:
+                    phys_x = 64 + (63 - x)
+                    phys_y = 7 - (y - 8)
+
+                if phys_x < 128:
+                    device_draw.point((phys_x, phys_y), fill="white")
+
+def run_vertical_scroll(bus_list):
+    """Handles the Scroll Down -> Scroll Up logic."""
+    
+    # 1. Create the tall image containing all buses
+    tall_image, tall_height = create_tall_scroll_image(bus_list)
+    
+    # Calculate how far we can scroll
+    # If we have 4 lines (32px), and screen is 16px, we scroll 16px.
+    max_scroll = tall_height - HEIGHT
+    if max_scroll < 0: max_scroll = 0
+    
+    # 2. SCROLL DOWN
+    for y in range(0, max_scroll + 1):
+        with canvas(device) as draw:
+            render_serpentine_window(draw, tall_image, y)
+        
+        if y == 0:
+            time.sleep(PAUSE_AT_ENDS)
+        else:
+            time.sleep(SCROLL_SPEED)
+            
+    # Pause at bottom
+    time.sleep(PAUSE_AT_ENDS)
+    
+    # 3. SCROLL UP
+    for y in range(max_scroll, -1, -1):
+        with canvas(device) as draw:
+            render_serpentine_window(draw, tall_image, y)
+        time.sleep(SCROLL_SPEED)
+
+# --- MAIN LOOP ---
+print(f"Starting 2-Row Bus Scroll... Day: {BRIGHTNESS_DAY} / Night: {BRIGHTNESS_NIGHT}")
+
+try:
+    while True:
+        check_brightness()
+        busses = get_departures()
+        
+        # Run the scroll animation
+        run_vertical_scroll(busses)
+        
+        # If API failed or empty, wait a bit extra
+        if len(busses) == 0:
+            time.sleep(5)
+
+except KeyboardInterrupt:
+    pass

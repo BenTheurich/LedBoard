@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matrix Controller</title>
+    <style>
+        body {
+            background-color: #121212;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            /* Changed from center to flex-start to prevent weird scrolling */
+            justify-content: flex-start; 
+            min-height: 100vh;
+            margin: 0;
+            padding: 40px 20px; /* Added top padding */
+            box-sizing: border-box;
+        }
+
+        h1 {
+            margin: 0 0 30px 0; /* Clean margins */
+            font-weight: 300;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            font-size: 1.5rem;
+            color: #888;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 15px;
+            width: 100%;
+            max-width: 400px;
+        }
+
+        form {
+            width: 100%;
+        }
+
+        button {
+            width: 100%;
+            padding: 20px;
+            border: none;
+            border-radius: 12px;
+            background-color: #1e1e1e;
+            color: #e0e0e0;
+            font-size: 1.2rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            text-align: left;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        button:active {
+            transform: scale(0.98);
+            background-color: #333;
+        }
+
+        /* Colors */
+        button[value="OFF"] {
+            background-color: #cf6679;
+            color: #000;
+            font-weight: bold;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        
+        button[value="Pong"] { border-left: 5px solid #03dac6; }
+        button[value="Clock"] { border-left: 5px solid #bb86fc; }
+        button[value="Bus Timetable"] { border-left: 5px solid #ffb74d; }
+        button[value="Game of Life"] { border-left: 5px solid #a0c4ff; }
+        button[value="Music Visualizer"] { border-left: 5px solid #ff80ab; }
+
+        /* The Dot Indicator */
+        .indicator {
+            height: 12px;
+            width: 12px;
+            border-radius: 50%;
+            background-color: #333; /* Default Grey */
+            transition: background-color 0.3s ease;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+        }
+
+        /* When Active (Green) */
+        .indicator.active {
+            background-color: #00e676; /* Bright Green */
+            box-shadow: 0 0 8px #00e676; /* Glow effect */
+        }
+
+    </style>
+</head>
+<body>
+
+    <h1>Control Center</h1>
+
+    <div class="grid">
+        {% for name, file in scripts.items() %}
+            {% if name != "OFF" %}
+                <form action="/run" method="post">
+                    <button type="submit" name="script_name" value="{{ name }}">
+                        {{ name }}
+                        <div class="indicator {% if name == active_script %}active{% endif %}"></div>
+                    </button>
+                </form>
+            {% endif %}
+        {% endfor %}
+
+        <form action="/run" method="post">
+            <button type="submit" name="script_name" value="OFF">
+                TURN OFF
+            </button>
+        </form>
+    </div>
+
+</body>
+</html>
