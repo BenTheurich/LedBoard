@@ -14,7 +14,7 @@ class Harmonograph:
 
     def _point(self, t):
         x = 31.5 + 28 * math.sin(t * 0.7 + self.phase) * math.cos(t * 0.19)
-        y = 7.5 + 6 * math.sin(t * 1.13 + self.phase * 0.5)
+        y = 7.5 + 7.5 * math.sin(t * 1.13 + self.phase * 0.5)
         return round(x), round(y)
 
     def render(self, t, dt):
