@@ -43,9 +43,9 @@ The clock uses the original CP437 font and 16-pixel stretch. Every digit has an 
 
 Falling Sand, Drawing Harmonograph, and Acid Rain run through `effect_runner.py` at a target of 20 FPS, using the same mapping and contrast 16. Each renderer uses elapsed time and bounded state. A terminated effect clears the board before the next program starts.
 
-Falling Sand starts empty. Three fixed, evenly spaced spouts each release six grains per second. Grains fall downward and slide diagonally around obstacles, building three piles. When all three inlets remain blocked after movement, the entire image slides downward one row per physics step while the spouts continue emitting. After sixteen shifts, every grain from the old pile has left the display; the newer grains still in flight begin accumulating on the floor again. Gravity always points downward. A cycle takes about 39 seconds with the default seed.
+Falling Sand starts empty and releases eighteen grains per second. Each grain chooses one of three evenly spaced, five-pixel-wide drop areas and a random position inside it. Grains fall downward and slide diagonally around obstacles, building uneven piles. Backed-up inlets spill into the nearest open top position so the screen can fill all 1,024 pixels, including the corners. The full image remains visible briefly before an eight-pixel plug opens at the bottom centre. Sand then falls through that opening, with floor grains sliding inward to clear the side piles. Pouring continues throughout drainage. The plug closes once every grain from the accumulated pile has exited; newer grains remain to start the next fill. Gravity always points downward. The first cycle takes about 85 seconds with the default seed.
 
-Drawing Harmonograph keeps the selected trajectory and a tail capped at 180 samples. Acid Rain uses small monochrome code glyphs in sixteen staggered lanes, with a denser leading symbol and sparser tails. The code falls through the bottom and recycles above the display after its tail exits. These three modes are directly available in the main controller; the temporary preview dashboard and rejected studies have been removed.
+Drawing Harmonograph keeps the selected trajectory and a tail capped at 180 samples. Acid Rain uses sixteen staggered, single-column pixel trails at 6–14 pixels per second, with two-pixel heads and dotted tails. Each trail falls through the bottom and recycles above the display after its tail exits. These three modes are directly available in the main controller; the temporary preview dashboard and rejected studies have been removed.
 
 ## Hardware-free tests
 
@@ -65,7 +65,7 @@ python -m pip install --no-deps luma.core==2.4.2
 python -m unittest discover -s tests -v
 ```
 
-The suite compares the bulk mapping with the original pixel loop, checks every logical pixel's location, verifies pacing through a fake clock, checks fixed clock-cell/separator positions and second-change redraws, checks spectrum interpolation independently of render rate, and exercises concurrent Flask requests with fake subprocesses. Visualization checks cover empty sand starts, three fixed spouts, downward physics, complete sliding drains with uninterrupted streams, repeated cycles, fixed rain tempo, continued motion, and bounded state/catch-up work.
+The suite compares the bulk mapping with the original pixel loop, checks every logical pixel's location, verifies pacing through a fake clock, checks fixed clock-cell/separator positions and second-change redraws, checks spectrum interpolation independently of render rate, and exercises concurrent Flask requests with fake subprocesses. Visualization checks cover empty sand starts, randomized drop areas, downward physics, full-screen fills, central drainage with uninterrupted streams, plug closure, repeated cycles, fixed rain tempo, continued motion, and bounded state/catch-up work.
 
 ## Deployment and recovery
 
