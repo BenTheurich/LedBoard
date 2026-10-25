@@ -2,162 +2,206 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app'))
+from falling_sand import (CELLS, DRAIN, DRAIN_GROW_STEPS, DRAIN_STEP, DROP_AREAS,
+                          FULL_STEPS, FallingSand, HEIGHT, SPOUTS, STEP, WIDTH)
 
-from falling_sand import DRAIN, DROP_AREAS, FULL_STEPS, FallingSand, HEIGHT, SPOUTS, STEP, WIDTH
+
+def load_points(effect, points):
+    grid = bytearray(CELLS)
+    for x, y in points:
+        grid[y * WIDTH + x] = 1
+    effect.grid = grid
+
+
+def full_container(effect):
+    effect.grid = bytearray([1]) * CELLS
 
 
 class FallingSandTests(unittest.TestCase):
-    def test_starts_empty_and_randomizes_positions_and_drop_area(self):
+    def test_empty_start_and_random_positions_within_three_drop_areas(self):
         effect = FallingSand()
         image = effect.render(0, 0)
-        self.assertEqual(image.size, (64, 16))
-        self.assertEqual(image.mode, "1")
+        self.assertEqual((image.mode, image.size), ('1', (64, 16)))
         self.assertIsNone(image.getbbox())
-        self.assertEqual(effect.grains, 0)
         self.assertEqual(SPOUTS[1] - SPOUTS[0], SPOUTS[2] - SPOUTS[1])
-        positions = set()
-        counts = [0, 0, 0]
+        positions, counts = set(), [0, 0, 0]
         for step in range(90):
             effect.render((step + 1) * STEP, STEP)
-            lit_inlets = {x for x, value in enumerate(effect.grid[:WIDTH]) if value}
-            self.assertEqual(len(lit_inlets), 1)
-            x = lit_inlets.pop()
+            inlets = {x for x, value in enumerate(effect.grid[:WIDTH]) if value}
+            self.assertEqual(len(inlets), 1)
+            x = inlets.pop()
             positions.add(x)
             self.assertIn(x, sum(DROP_AREAS, ()))
             counts[next(index for index, area in enumerate(DROP_AREAS) if x in area)] += 1
             self.assertEqual(effect.grains, step + 1)
-            self.assertEqual(effect.phase, "fill")
         self.assertGreater(len(positions), len(SPOUTS))
         self.assertTrue(all(counts))
         self.assertGreater(len(set(counts)), 1)
 
-    def test_falling_grains_move_down_and_floor_grains_stay_in_place(self):
+    def test_packed_image_matches_every_logical_pixel(self):
+        effect = FallingSand()
+        grid = bytearray(index % 11 in (0, 2, 5) for index in range(CELLS))
+        effect.grid = grid
+        image = effect.render(0, 0)
+        self.assertEqual(list(map(bool, image.getdata())), list(map(bool, grid)))
+        self.assertEqual(effect.grains, sum(grid))
+
+    def test_vacancy_propagates_only_one_row_per_tick(self):
+        effect = FallingSand()
+        grid = bytearray([1]) * CELLS
+        grid[(HEIGHT - 1) * WIDTH + 32] = 0
+        effect.grid = grid
+        effect._move()
+        expected = bytearray([1]) * CELLS
+        expected[(HEIGHT - 2) * WIDTH + 32] = 0
+        self.assertEqual(effect.grid, expected)
+        self.assertEqual(effect.grains, CELLS - 1)
+
+    def test_competing_diagonals_do_not_merge_grains(self):
         effect = FallingSand(seed=7)
-        effect.grid[8 * WIDTH + 32] = 1
-        effect.grid[15 * WIDTH + 20] = 1
-        effect.grid[14 * WIDTH + 20] = 1
-        effect.grains = 3
-        effect.render(STEP, STEP)
-        self.assertEqual(effect.gravity, 1)
-        self.assertEqual(effect.grid[8 * WIDTH + 32], 0)
-        self.assertEqual(effect.grid[9 * WIDTH + 32], 1)
-        self.assertEqual(effect.grid[15 * WIDTH + 20], 1)
-        self.assertEqual(effect.grid[14 * WIDTH + 20], 0)
-        self.assertEqual(effect.grid[15 * WIDTH + 19] + effect.grid[15 * WIDTH + 21], 1)
-        self.assertEqual(effect.grains, sum(effect.grid))
-
-    def test_backed_up_drop_areas_overflow_until_the_corners_are_full(self):
-        effect = FallingSand()
-        effect.grid[:] = bytes([1]) * (WIDTH * HEIGHT)
-        for y in range(HEIGHT):
-            effect.grid[y * WIDTH] = 0
-        effect.grains = sum(effect.grid)
-        for step in range(HEIGHT):
-            image = effect.render((step + 1) * STEP, STEP)
-            self.assertEqual(effect.grains, WIDTH * HEIGHT - HEIGHT + step + 1)
-            self.assertEqual(effect.grains, sum(effect.grid))
-            self.assertEqual(effect.phase, "full" if step == HEIGHT - 1 else "fill")
-        self.assertEqual(image.tobytes(), bytes([255]) * (WIDTH * HEIGHT // 8))
-
-    def test_fully_lit_image_is_visible_before_the_central_plug_opens(self):
-        effect = FallingSand()
-        effect.grid[:] = bytes([1]) * (WIDTH * HEIGHT)
-        effect.grains = WIDTH * HEIGHT
-        image = effect.render(STEP, STEP)
-        self.assertEqual(effect.phase, "full")
-        self.assertEqual(image.tobytes(), bytes([255]) * (WIDTH * HEIGHT // 8))
-        for step in range(FULL_STEPS - 1):
-            effect.render((step + 2) * STEP, STEP)
-            self.assertEqual(effect.phase, "full")
-            self.assertEqual(effect.grains, WIDTH * HEIGHT)
-        effect.render((FULL_STEPS + 1) * STEP, STEP)
-        self.assertEqual(effect.phase, "drain")
-        self.assertTrue(all(not effect.grid[(HEIGHT - 1) * WIDTH + x] for x in DRAIN))
-        self.assertEqual(effect.grid[-WIDTH], 1)
-        self.assertEqual(effect.grid[-1], 1)
-        self.assertEqual(effect.grains, WIDTH * HEIGHT - len(DRAIN))
-
-    def test_delayed_frame_cannot_skip_the_fully_lit_image(self):
-        effect = FallingSand()
-        effect.grid[:] = bytes([1]) * (WIDTH * HEIGHT)
-        effect.grid[0] = 0
-        effect.grains = WIDTH * HEIGHT - 1
-        image = effect.render(STEP * 6, STEP * 6)
-        self.assertEqual(effect.phase, "full")
-        self.assertEqual(image.tobytes(), bytes([255]) * (WIDTH * HEIGHT // 8))
-
-    def test_open_plug_funnels_floor_grains_and_keeps_new_sand_falling(self):
-        effect = FallingSand()
-        for x, y in ((0, 15), (63, 15), (0, 8), (28, 14), (31, 15)):
-            effect.grid[y * WIDTH + x] = 1
-        effect.grains = 5
-        effect._open_drain()
-        image = effect.render(STEP, STEP)
-        self.assertEqual(effect.grid[9 * WIDTH], 1)
-        self.assertEqual(effect.grid[15 * WIDTH + 1], 1)
-        self.assertEqual(effect.grid[15 * WIDTH + 62], 1)
-        self.assertTrue(all(not effect.grid[(HEIGHT - 1) * WIDTH + x] for x in DRAIN))
-        self.assertEqual(effect._draining_grains, 3)
-        self.assertEqual(effect.grid[:WIDTH].count(2), 1)
-        self.assertEqual(effect.grains, 4)
-        self.assertEqual(sum(bool(pixel) for pixel in image.getdata()), 4)
-        for step in range(200):
-            effect.render((step + 2) * STEP, STEP)
-            self.assertEqual(effect.grains, WIDTH * HEIGHT - effect.grid.count(0))
-            if effect.completed_cycles:
-                break
-        self.assertEqual(effect.completed_cycles, 1)
-        self.assertEqual(effect.phase, "fill")
-        self.assertEqual(effect._draining_grains, 0)
-        self.assertGreater(effect.grains, 0)
-        # Once plugged, grains at the outlet accumulate instead of escaping.
-        outlet = (HEIGHT - 1) * WIDTH + WIDTH // 2
-        if not effect.grid[outlet]:
-            effect.grid[outlet] = 1
-            effect.grains += 1
-        before = effect.grains
-        effect.render(0, STEP)
-        self.assertTrue(effect.grid[outlet])
-        self.assertEqual(effect.grains, before + 1)
-
-    def test_repeated_full_fill_and_plug_cycles_do_not_stall_or_lose_counts(self):
-        effect = FallingSand(seed=7)
-        phases = set()
-        saw_fill_after_drain = False
-        full_cycles = set()
-        for step in range(4000):
-            image = effect.render((step + 1) * STEP, STEP)
-            phases.add(effect.phase)
-            self.assertEqual(len(effect.grid), WIDTH * HEIGHT)
-            self.assertEqual(effect.grains, WIDTH * HEIGHT - effect.grid.count(0))
-            self.assertLessEqual(effect.grains, WIDTH * HEIGHT)
-            self.assertEqual(effect.gravity, 1)
-            if effect.phase == "drain":
-                self.assertEqual(effect._draining_grains, effect.grid.count(1))
-                self.assertTrue(all(not effect.grid[(HEIGHT - 1) * WIDTH + x] for x in DRAIN))
-            if effect.phase == "full":
-                full_cycles.add(effect.completed_cycles)
-                self.assertEqual(effect.grains, WIDTH * HEIGHT)
-                self.assertEqual(image.tobytes(), bytes([255]) * (WIDTH * HEIGHT // 8))
-            if effect.completed_cycles and effect.phase == "fill":
-                saw_fill_after_drain = True
-                self.assertEqual(effect._draining_grains, 0)
-                self.assertGreater(effect.grains, 0)
-            if effect.completed_cycles >= 2:
-                break
-        self.assertEqual(phases, {"fill", "full", "drain"})
-        self.assertEqual(full_cycles, {0, 1})
-        self.assertEqual(effect.completed_cycles, 2)
-        self.assertTrue(saw_fill_after_drain)
-
-    def test_long_pause_has_bounded_catch_up_work(self):
-        effect = FallingSand()
-        effect.render(1000, 1000)
-        self.assertEqual(effect.steps, 6)
+        load_points(effect, ((20, 4), (22, 4), (19, 5), (20, 5), (22, 5), (23, 5)))
+        effect._move()
+        grid = effect.grid
         self.assertEqual(effect.grains, 6)
-        self.assertEqual(effect.phase, "fill")
+        self.assertEqual(sum(grid), 6)
+        self.assertEqual(grid[5 * WIDTH + 21], 1)
+        self.assertEqual(grid[4 * WIDTH + 20] + grid[4 * WIDTH + 22], 1)
+
+    def test_edge_grains_cannot_wrap_into_another_row(self):
+        for x, neighbor, invalid in ((0, 1, (63, 3)), (63, 62, (0, 5))):
+            with self.subTest(edge=x):
+                effect = FallingSand()
+                load_points(effect, ((x, 3), (x, 4), (neighbor, 4)))
+                effect._move()
+                grid = effect.grid
+                self.assertEqual(grid[3 * WIDTH + x], 1)
+                self.assertEqual(grid[invalid[1] * WIDTH + invalid[0]], 0)
+                self.assertEqual(sum(grid), 3)
+
+    def test_backed_up_inlets_eventually_fill_every_corner(self):
+        effect = FallingSand()
+        grid = bytearray([1]) * CELLS
+        for y in range(HEIGHT):
+            grid[y * WIDTH] = 0
+        effect.grid = grid
+        for step in range(300):
+            image = effect.render((step + 1) * STEP, STEP)
+            if effect.grains < CELLS:
+                self.assertEqual(effect.phase, 'fill')
+            else:
+                break
+        self.assertEqual(effect.phase, 'full')
+        self.assertEqual(image.tobytes(), bytes([255]) * (CELLS // 8))
+
+    def test_full_image_is_visible_even_after_a_delayed_frame(self):
+        effect = FallingSand()
+        grid = bytearray([1]) * CELLS
+        grid[0] = 0
+        effect.grid = grid
+        image = effect.render(STEP * 6, STEP * 6)
+        self.assertEqual(effect.phase, 'full')
+        self.assertEqual(image.tobytes(), bytes([255]) * (CELLS // 8))
+        for _ in range(FULL_STEPS - 1):
+            effect.render(0, STEP)
+            self.assertEqual(effect.phase, 'full')
+        effect.render(0, STEP)
+        self.assertEqual(effect.phase, 'drain')
+        self.assertEqual(effect.drain_width, len(DRAIN))
+
+    def test_small_centre_drain_does_not_drag_side_grains(self):
+        effect = FallingSand()
+        # A supported floor stays put until the opening reaches it.
+        load_points(effect, ((x, HEIGHT - 1) for x in range(WIDTH)))
+        effect._open_drain()
+        effect.render(0, DRAIN_STEP)
+        grid = effect.grid
+        self.assertEqual(sum(grid), WIDTH - len(DRAIN))
+        for x in range(WIDTH):
+            self.assertEqual(grid[(HEIGHT - 1) * WIDTH + x], int(x not in DRAIN))
+        self.assertIsNone(effect.render(0, 0).crop((0, 0, WIDTH, 1)).getbbox())
+
+    def test_drain_widens_symmetrically_to_the_whole_bottom_then_closes(self):
+        effect = FallingSand()
+        full_container(effect)
+        effect._open_drain()
+        widths, previous = set(), CELLS
+        for step in range(DRAIN_GROW_STEPS * (WIDTH // 2) + HEIGHT * 3):
+            image = effect.render(step * DRAIN_STEP, DRAIN_STEP)
+            if effect.phase == 'drain':
+                width = effect.drain_width
+                widths.add(width)
+                self.assertEqual(width % 2, 0)
+                start = (WIDTH - width) // 2
+                self.assertEqual((effect._outlet >> ((HEIGHT - 1) * WIDTH)).bit_count(), width)
+                self.assertEqual(effect._outlet >> ((HEIGHT - 1) * WIDTH), ((1 << width) - 1) << start)
+                self.assertLessEqual(effect.grains, previous)
+                previous = effect.grains
+            else:
+                break
+        # The last widening step may empty the final corner grains immediately.
+        self.assertEqual(effect._drain_radius * 2, WIDTH)
+        self.assertIn(2, widths)
+        self.assertIn(WIDTH - 2, widths)
+        self.assertEqual(effect.phase, 'fill')
+        self.assertEqual(effect.completed_cycles, 1)
+        self.assertEqual(effect.grains, 0)
+        self.assertEqual(effect.drain_width, 0)
+        self.assertIsNone(image.getbbox())
+        # The newly plugged floor holds grains again.
+        load_points(effect, ((WIDTH // 2, HEIGHT - 1),))
+        effect.render(0, STEP)
+        self.assertEqual(effect.grains, 2)
+        self.assertEqual(effect.grid[(HEIGHT - 1) * WIDTH + WIDTH // 2], 1)
+
+    def test_frame_rate_does_not_change_drain_tempo(self):
+        states = []
+        for fps in (20, 40):
+            effect = FallingSand(seed=7)
+            full_container(effect)
+            effect._open_drain()
+            for frame in range(fps * 3):
+                image = effect.render((frame + 1) / fps, 1 / fps)
+            states.append((image.tobytes(), effect.grains, effect.drain_width, effect.steps))
+        self.assertEqual(states[0], states[1])
+
+    def test_repeated_fill_and_empty_cycles_preserve_mass_and_pause_pouring(self):
+        effect = FallingSand(seed=7)
+        full_cycles = set()
+        previous_phase, previous_grains = None, 0
+        empty_images = 0
+        for frame in range(8000):
+            image = effect.render((frame + 1) / 20, 1 / 20)
+            lit = sum(byte.bit_count() for byte in image.tobytes())
+            self.assertEqual(lit, effect.grains)
+            self.assertLessEqual(effect.grains, CELLS)
+            self.assertEqual(effect.gravity, 1)
+            if effect.phase == 'full':
+                full_cycles.add(effect.completed_cycles)
+                self.assertEqual(effect.grains, CELLS)
+            if previous_phase == effect.phase == 'drain':
+                self.assertLessEqual(effect.grains, previous_grains)
+            if previous_phase == 'drain' and effect.phase == 'fill':
+                empty_images += 1
+                self.assertEqual(effect.grains, 0)
+                self.assertIsNone(image.getbbox())
+            previous_phase, previous_grains = effect.phase, effect.grains
+            if effect.completed_cycles == 2:
+                break
+        self.assertEqual(full_cycles, {0, 1})
+        self.assertEqual(empty_images, 2)
+        self.assertEqual(effect.completed_cycles, 2)
+
+    def test_pause_catch_up_is_bounded_in_both_phases(self):
+        for drain in (False, True):
+            with self.subTest(drain=drain):
+                effect = FallingSand()
+                if drain:
+                    full_container(effect)
+                    effect._open_drain()
+                effect.render(1000, 1000)
+                self.assertEqual(effect.steps, 6)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()

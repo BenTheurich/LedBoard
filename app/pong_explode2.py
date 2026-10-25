@@ -1,20 +1,13 @@
 import time
 import random
-from PIL import Image, ImageDraw
-from luma.core.interface.serial import spi, noop
-from luma.led_matrix.device import max7219
-from luma.core.render import canvas
 from display_utils import FramePacer
-
-# --- HARDWARE SETUP ---
-serial = spi(port=0, device=0, gpio=noop())
-# 16 Matrices (16x64 Serpentine)
-device = max7219(serial, cascaded=16, block_orientation=-90, rotate=0)
-device.contrast(16)
 
 # --- LOGICAL DIMENSIONS ---
 WIDTH = 64
 HEIGHT = 16 
+BALL_SPEED = 1.2
+PARTICLE_GRAVITY = 0.10
+PARTICLE_SPEED_RANGE = (0.2, 0.5)
 
 # --- STATES ---
 STATE_PLAYING = 1
@@ -48,9 +41,8 @@ class PongPhysics:
         self.ball_y = random.randint(4, 12)
         self.exploded_paddle = None
         
-        speed = 1.5 
         direction = random.choice([-1, 1])
-        self.vel_x = direction * speed
+        self.vel_x = direction * BALL_SPEED
         self.vel_y = random.uniform(-0.6, 0.6)
 
     def trigger_explosion(self, side):
@@ -67,21 +59,20 @@ class PongPhysics:
             self.particles.append({
                 'x': float(start_x + random.randint(-1, 1)),
                 'y': float(start_y + random.randint(0, 4)), 
-                # Shoot outward towards center
-                'vx': random.uniform(0.5, 1.5) if side == 'LEFT' else random.uniform(-1.5, -0.5), 
+                # Keep the debris near the paddle during the longer, softer arc.
+                'vx': random.uniform(*PARTICLE_SPEED_RANGE) * (1 if side == 'LEFT' else -1),
                 'vy': random.uniform(-0.8, 0.5) # Up/Down spread
             })
 
     def update_particles(self):
-        gravity = 0.25      # Pulls them down
-        bounce = 0.5        # Bounciness (0.5 = loses 50% height each bounce)
+        bounce = 0.5        # Retains half the vertical velocity after impact.
         friction = 0.8      # Floor friction (0.8 = slows down sideways)
         
         all_stopped = True
         
         for p in self.particles:
             # Apply Physics
-            p['vy'] += gravity
+            p['vy'] += PARTICLE_GRAVITY
             p['x'] += p['vx']
             p['y'] += p['vy']
             
@@ -102,7 +93,7 @@ class PongPhysics:
             if abs(p['vx']) > 0.05 or abs(p['vy']) > 0.05:
                 all_stopped = False
 
-        # If all particles have settled (stopped moving), start the 5-second timer
+        # If all particles have settled, start the existing two-second pause.
         if all_stopped:
             self.state = STATE_WAITING
             self.wait_start_time = time.time()
@@ -213,17 +204,27 @@ class PongPhysics:
         if phys_x < 128:
             draw.point((phys_x, phys_y), fill="white")
 
-# --- MAIN LOOP ---
-game = PongPhysics()
-print("Starting Physics Pong...")
-pacer = FramePacer(25)
+def main():
+    # Keep importing PongPhysics safe for desktop previews and tests.
+    from luma.core.interface.serial import spi, noop
+    from luma.led_matrix.device import max7219
+    from luma.core.render import canvas
 
-try:
-    while True:
-        game.update()
-        with canvas(device) as draw:
-            game.render_serpentine(draw)
-        pacer.wait()
+    serial = spi(port=0, device=0, gpio=noop())
+    device = max7219(serial, cascaded=16, block_orientation=-90, rotate=0)
+    device.contrast(16)
+    game = PongPhysics()
+    print("Starting Physics Pong...")
+    pacer = FramePacer(25)
+    try:
+        while True:
+            game.update()
+            with canvas(device) as draw:
+                game.render_serpentine(draw)
+            pacer.wait()
+    except KeyboardInterrupt:
+        pass
 
-except KeyboardInterrupt:
-    pass
+
+if __name__ == "__main__":
+    main()
