@@ -2,14 +2,18 @@ import subprocess
 import socket
 import threading
 from flask import Flask, render_template, request, redirect
+from message import MAX_MESSAGE_LENGTH, validate_message
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 4096
 
 # --- CONFIGURATION ---
 SCRIPTS = {
     "Clock": "clock.py",
     "Game of Life": "game_of_life.py",
     "Bus Timetable": "my_bus_script3.py",
+    "Weather": "weather.py",
+    "Message Board": "message.py",
     "Pong": "pong_explode2.py",
     "Music Visualizer": "visualizations.py",
     "Falling Sand": "falling_sand.py",
@@ -17,9 +21,15 @@ SCRIPTS = {
     "Acid Rain": "acid_rain.py",
     "OFF": "clear_screen.py"
 }
+MODE_GROUPS = {
+    "Everyday": ("Clock", "Bus Timetable", "Weather"),
+    "Visualizers": ("Game of Life", "Pong", "Music Visualizer", "Falling Sand",
+                    "Drawing Harmonograph", "Acid Rain"),
+}
 
 current_process = None
 active_script_name = "OFF" # Tracks which button should be green
+last_message = ""
 # Flask serves requests concurrently; display ownership must change atomically.
 switch_lock = threading.Lock()
 
@@ -75,30 +85,61 @@ def kill_current_process():
 
 @app.route("/")
 def index():
-    # Pass the active_script_name to the HTML
+    return controller_page(message_sent=request.args.get("sent") == "1")
+
+
+def controller_page(message_error=None, message_value=None, message_sent=False):
     with switch_lock:
         selected_script = active_script_name
-    return render_template("index.html", scripts=SCRIPTS, active_script=selected_script)
+        saved_message = last_message
+    return render_template(
+        "index.html", groups=MODE_GROUPS, active_script=selected_script,
+        message_value=saved_message if message_value is None else message_value,
+        message_error=message_error, max_message_length=MAX_MESSAGE_LENGTH,
+        message_sent=message_sent and selected_script == "Message Board",
+    )
+
+
+def switch_program(script_name, extra_args=()):
+    """Caller holds switch_lock so every mode has one exclusive display owner."""
+    global current_process, active_script_name
+    print(f"Switching to: {script_name}")
+    kill_current_process()
+    active_script_name = "OFF"
+    subprocess.run(["python3", "clear_screen.py"])
+    if script_name != "OFF":
+        current_process = subprocess.Popen(["python3", SCRIPTS[script_name], *extra_args])
+    active_script_name = script_name
 
 @app.route("/run", methods=["POST"])
 def run_script():
-    global current_process, active_script_name
-    
     script_name = request.form.get("script_name")
-    filename = SCRIPTS.get(script_name)
-
-    if filename:
+    if script_name == "Message Board":
+        return redirect("/#message")
+    if script_name in SCRIPTS:
         with switch_lock:
-            print(f"Switching to: {script_name}")
-            kill_current_process()
-            active_script_name = "OFF"
-            subprocess.run(["python3", "clear_screen.py"])
-
-            if script_name != "OFF":
-                current_process = subprocess.Popen(["python3", filename])
-            active_script_name = script_name
-            
+            switch_program(script_name)
     return redirect("/")
+
+
+@app.route("/message", methods=["POST"])
+def send_message():
+    global last_message
+    value = request.form.get("message", "")
+    try:
+        message = validate_message(value)
+    except ValueError as error:
+        return controller_page(message_error=str(error), message_value=value), 400
+    with switch_lock:
+        # One argument also preserves messages beginning with '-' for argparse.
+        switch_program("Message Board", ("--message=" + message,))
+        last_message = message
+    return redirect("/?sent=1#message")
+
+
+@app.errorhandler(413)
+def message_too_large(error):
+    return controller_page(message_error="The request is too large. Use a shorter message."), 413
 
 if __name__ == "__main__":
     my_ip = get_ip_address()

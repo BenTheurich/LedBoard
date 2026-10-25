@@ -1,127 +1,92 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Matrix Controller</title>
-    <style>
-        body {
-            background-color: #121212;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            color: white;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            /* Changed from center to flex-start to prevent weird scrolling */
-            justify-content: flex-start; 
-            min-height: 100vh;
-            margin: 0;
-            padding: 40px 20px; /* Added top padding */
-            box-sizing: border-box;
-        }
-
-        h1 {
-            margin: 0 0 30px 0; /* Clean margins */
-            font-weight: 300;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-            font-size: 1.5rem;
-            color: #888;
-        }
-
-        .grid {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 15px;
-            width: 100%;
-            max-width: 400px;
-        }
-
-        form {
-            width: 100%;
-        }
-
-        button {
-            width: 100%;
-            padding: 20px;
-            border: none;
-            border-radius: 12px;
-            background-color: #1e1e1e;
-            color: #e0e0e0;
-            font-size: 1.2rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-            text-align: left;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        button:active {
-            transform: scale(0.98);
-            background-color: #333;
-        }
-
-        /* Colors */
-        button[value="OFF"] {
-            background-color: #cf6679;
-            color: #000;
-            font-weight: bold;
-            justify-content: center;
-            margin-top: 20px;
-        }
-        
-        button[value="Pong"] { border-left: 5px solid #03dac6; }
-        button[value="Clock"] { border-left: 5px solid #bb86fc; }
-        button[value="Bus Timetable"] { border-left: 5px solid #ffb74d; }
-        button[value="Game of Life"] { border-left: 5px solid #a0c4ff; }
-        button[value="Music Visualizer"] { border-left: 5px solid #ff80ab; }
-        button[value="Falling Sand"] { border-left: 5px solid #e4bf7b; }
-        button[value="Drawing Harmonograph"] { border-left: 5px solid #b5a8e8; }
-        button[value="Acid Rain"] { border-left: 5px solid #8fcf94; }
-
-        /* The Dot Indicator */
-        .indicator {
-            height: 12px;
-            width: 12px;
-            border-radius: 50%;
-            background-color: #333; /* Default Grey */
-            transition: background-color 0.3s ease;
-            box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
-        }
-
-        /* When Active (Green) */
-        .indicator.active {
-            background-color: #00e676; /* Bright Green */
-            box-shadow: 0 0 8px #00e676; /* Glow effect */
-        }
-
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Matrix Controller</title>
+<style>
+:root { color-scheme: dark; --bg: #121212; --surface: #202020; --border: #454545; --text: #f2f2f2; --muted: #b4b4b4; --active: #a1dfb5; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 32px 16px; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 1rem; line-height: 1.5; }
+main { width: 100%; max-width: 680px; margin: 0 auto; }
+header { margin-bottom: 32px; }
+h1 { margin: 0 0 8px; font-size: 1.6rem; font-weight: 600; }
+h2 { margin: 0 0 12px; font-size: 1.05rem; font-weight: 600; }
+p { margin: 0; }
+.current { color: var(--muted); }
+.current strong { color: var(--text); font-weight: 500; }
+section { margin-bottom: 32px; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.grid button { height: 100%; }
+form { margin: 0; min-width: 0; }
+button, textarea { font: inherit; }
+button { width: 100%; min-height: 56px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); cursor: pointer; text-align: left; line-height: 1.3; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+button:hover { background: #2c2c2c; }
+button:active { background: #353535; }
+button:focus-visible, textarea:focus-visible { outline: 3px solid #a4caff; outline-offset: 3px; }
+button[aria-pressed="true"] { border-color: var(--active); color: var(--active); }
+.indicator { flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%; background: #666; }
+button[aria-pressed="true"] .indicator { background: var(--active); }
+label { display: block; margin-bottom: 8px; }
+textarea { display: block; width: 100%; min-height: 100px; resize: vertical; border: 1px solid var(--border); border-radius: 12px; padding: 12px; background: #191919; color: var(--text); line-height: 1.5; }
+textarea::placeholder { color: #999; }
+textarea[aria-invalid="true"] { border-color: #ffb4b4; }
+.help { color: var(--muted); font-size: 0.875rem; margin-top: 8px; }
+.help a { color: inherit; text-underline-offset: 3px; }
+.send { margin-top: 12px; background: #c6ddcb; border-color: #c6ddcb; color: #142319; justify-content: center; font-weight: 600; }
+.send:hover { background: #d8e9dc; }
+.send:active { background: #adcbb5; }
+.error { color: #ffb4b4; margin-top: 8px; }
+.success { color: var(--active); margin-top: 8px; }
+.off { color: #ffb4b4; justify-content: center; }
+@media (max-width: 360px) { .grid { grid-template-columns: 1fr; } }
+</style>
 </head>
 <body>
-
-    <h1>Control Center</h1>
-
+<main>
+<header>
+    <h1>Matrix Controller</h1>
+    <p class="current">Now showing: <strong>{{ 'Off' if active_script == 'OFF' else active_script }}</strong></p>
+</header>
+<section aria-labelledby="everyday-heading">
+    <h2 id="everyday-heading">Everyday</h2>
     <div class="grid">
-        {% for name, file in scripts.items() %}
-            {% if name != "OFF" %}
-                <form action="/run" method="post">
-                    <button type="submit" name="script_name" value="{{ name }}">
-                        {{ name }}
-                        <div class="indicator {% if name == active_script %}active{% endif %}"></div>
-                    </button>
-                </form>
-            {% endif %}
-        {% endfor %}
-
+        {% for name in groups['Everyday'] %}
         <form action="/run" method="post">
-            <button type="submit" name="script_name" value="OFF">
-                TURN OFF
+            <button type="submit" name="script_name" value="{{ name }}" aria-pressed="{{ 'true' if name == active_script else 'false' }}">
+                <span>{{ name }}</span><span class="indicator" aria-hidden="true"></span>
             </button>
         </form>
+        {% endfor %}
     </div>
-
+    <p class="help">Weather for Garching: now, daily high and low, rain, and the next six hours. Temperatures in °C and °F. Forecasts by <a href="https://open-meteo.com/">Open-Meteo</a>.</p>
+</section>
+<section id="message" aria-labelledby="message-heading">
+    <h2 id="message-heading">Message board</h2>
+    <form action="/message" method="post">
+        <label for="message-text">Text to display</label>
+        <textarea id="message-text" name="message" rows="2" maxlength="{{ max_message_length }}" required placeholder="Write a message for the board" aria-describedby="message-help{% if message_error %} message-error{% endif %}"{% if message_error %} aria-invalid="true" autofocus{% endif %}>{{ message_value }}</textarea>
+        <p class="help" id="message-help">Up to {{ max_message_length }} characters across two lines. Long lines scroll; accents are simplified. Emoji aren't supported.</p>
+        {% if message_error %}<p class="error" id="message-error" role="alert">{{ message_error }}</p>{% endif %}
+        {% if message_sent %}<p class="success" role="status">Message sent to the board.</p>{% endif %}
+        <button class="send" type="submit">Send to board</button>
+    </form>
+</section>
+<section aria-labelledby="visualizers-heading">
+    <h2 id="visualizers-heading">Visualizers</h2>
+    <div class="grid">
+        {% for name in groups['Visualizers'] %}
+        <form action="/run" method="post">
+            <button type="submit" name="script_name" value="{{ name }}" aria-pressed="{{ 'true' if name == active_script else 'false' }}">
+                <span>{{ name }}</span><span class="indicator" aria-hidden="true"></span>
+            </button>
+        </form>
+        {% endfor %}
+    </div>
+</section>
+<form action="/run" method="post">
+    <button class="off" type="submit" name="script_name" value="OFF" aria-pressed="{{ 'true' if active_script == 'OFF' else 'false' }}">Turn off display</button>
+</form>
+</main>
 </body>
 </html>

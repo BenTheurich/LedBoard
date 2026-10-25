@@ -27,6 +27,8 @@ The installed programs use SPI bus 0, device 0, with `cascaded=16`, `block_orien
 | Clock | [clock.py](app/clock.py) | Stretched hours, minutes, and seconds in fixed-width digit cells |
 | Game of Life | [game_of_life.py](app/game_of_life.py) | Cellular automaton |
 | Bus Timetable | [my_bus_script3.py](app/my_bus_script3.py) | Two-row scrolling departures with day/night brightness |
+| Weather | [weather.py](app/weather.py) | Garching conditions, feels-like, daily high/low in Celsius and Fahrenheit, and six hourly precipitation forecasts |
+| Message Board | [message.py](app/message.py) | Send up to two lines from the controller; long rows scroll horizontally |
 | Pong | [pong_explode2.py](app/pong_explode2.py) | Animated Pong with particle effects |
 | Music Visualizer | [visualizations.py](app/visualizations.py) | Simulated spectrum bars; no audio input |
 | Falling Sand | [falling_sand.py](app/falling_sand.py) | Three random drop areas fill the screen; pouring pauses while a central opening widens to drain it |
@@ -35,6 +37,10 @@ The installed programs use SPI bus 0, device 0, with `cascaded=16`, `block_orien
 | TURN OFF | [clear_screen.py](app/clear_screen.py) | Clears the matrix |
 
 The bus program queries MVG through the Python `mvg` package for **Garching, Untere Straßäcker**, filtering lines **230**, **292**, and **X205** toward **Forschungszentrum**. It displays X205 as `205`. U6 departures at Garching-Forschungszentrum were part of the original goal and are not implemented in this selected program.
+
+The controller groups Clock, Bus Timetable, and Weather under **Everyday**, gives messages their own text form, and groups animations under **Visualizers**. Sending a valid message selects Message Board immediately. Modes stay selected until changed through the controller; no automatic mode switching is configured. Weather and messages require deploying the new source files before they appear on the Pi.
+
+Weather uses [Open-Meteo](https://open-meteo.com/) without an API key. See [weather and messages](docs/application.md#weather-and-messages) for display pages, refresh behavior, and coordinates.
 
 ## Run a network check from Windows
 

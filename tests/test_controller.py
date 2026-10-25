@@ -6,6 +6,7 @@ import threading
 import unittest
 from unittest.mock import Mock, call, patch
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 
 spec = importlib.util.spec_from_file_location(
     "garching_controller", Path(__file__).resolve().parents[1] / "app" / "app.py"
@@ -53,6 +54,7 @@ class ControllerTests(unittest.TestCase):
         controller.app.config["TESTING"] = True
         controller.current_process = None
         controller.active_script_name = "OFF"
+        controller.last_message = ""
         controller.switch_lock = threading.Lock()
 
     def tearDown(self):
@@ -170,6 +172,55 @@ class ControllerTests(unittest.TestCase):
         html = controller.app.test_client().get("/").get_data(as_text=True)
         for name in expected:
             self.assertIn(name, html)
+
+    def test_weather_and_message_have_exclusive_display_ownership(self):
+        created = []
+        def spawn(args):
+            process = FakeProcess(args)
+            created.append(process)
+            return process
+
+        with patch.object(controller.subprocess, "run"), \
+                patch.object(controller.subprocess, "Popen", side_effect=spawn):
+            client = controller.app.test_client()
+            self.assertEqual(client.post("/run", data={"script_name": "Weather"}).status_code, 302)
+            response = client.post("/message", data={"message": "--hello; $(no command)\nSecond line"})
+            self.assertEqual(response.status_code, 302)
+            self.assertFalse(created[0].alive)
+            self.assertEqual(created[1].args, ["python3", "message.py", "--message=--hello; $(no command)\nSecond line"])
+            html = client.get(response.location).get_data(as_text=True)
+            self.assertIn("Message sent to the board.", html)
+            self.assertIn("Now showing: <strong>Message Board</strong>", html)
+            self.assertEqual(controller.last_message, "--hello; $(no command)\nSecond line")
+            client.post("/run", data={"script_name": "Clock"})
+            self.assertFalse(created[1].alive)
+            self.assertTrue(created[2].alive)
+
+    def test_invalid_messages_preserve_current_display_and_form_text(self):
+        process = Mock()
+        controller.current_process = process
+        controller.active_script_name = "Weather"
+        with patch.object(controller.subprocess, "run") as clear, \
+                patch.object(controller.subprocess, "Popen") as spawn:
+            for value in (" ", "one\ntwo\nthree", "a" * 281, "hello \U0001f600", "\x00bad"):
+                with self.subTest(value=value):
+                    response = controller.app.test_client().post("/message", data={"message": value})
+                    self.assertEqual(response.status_code, 400)
+                    self.assertIn(b'role="alert"', response.data)
+            response = controller.app.test_client().post("/message", data={"message": '<script>alert("x")</script>\n2\n3'})
+            self.assertIn(b"&lt;script&gt;", response.data)
+            self.assertNotIn(b"<script>", response.data)
+        process.terminate.assert_not_called()
+        clear.assert_not_called()
+        spawn.assert_not_called()
+        self.assertEqual(controller.active_script_name, "Weather")
+
+    def test_oversized_request_does_not_switch_display(self):
+        with patch.object(controller.subprocess, "run") as clear:
+            response = controller.app.test_client().post("/message", data={"message": "a" * 5000})
+        self.assertEqual(response.status_code, 413)
+        self.assertIn(b"Use a shorter message", response.data)
+        clear.assert_not_called()
 
 
 if __name__ == "__main__":

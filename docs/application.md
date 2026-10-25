@@ -49,6 +49,20 @@ Sand movement uses a compact occupancy bitmask and simultaneous moves into cells
 
 Drawing Harmonograph keeps the selected trajectory and a tail capped at 180 samples. Acid Rain uses sixteen staggered, single-column pixel trails at 6–14 pixels per second, with two-pixel heads and dotted tails. Each trail falls through the bottom and recycles above the display after its tail exits. These three modes are directly available in the main controller; the temporary preview dashboard and rejected studies have been removed.
 
+## Weather and messages
+
+The controller's **Everyday** section contains Clock, Bus Timetable, and Weather. The separate message form selects Message Board when submitted; the animations are grouped under **Visualizers**. Selection remains manual. The controller still owns one display subprocess at a time.
+
+Weather cycles through current temperature and conditions, feels-like temperature and wind, today's high, today's low, today's precipitation chance and amount, and the next six hourly forecasts. Current, feels-like, high, and low temperatures include Celsius and Fahrenheit. Hourly cards show Celsius, precipitation probability, and millimetres. `TMR` marks hours after midnight. Feels-like temperature and wind provide context for choosing clothing; the display does not make a personal jacket recommendation. Each card stays for at least four seconds and allows longer rows to finish scrolling.
+
+Forecasts come from the [Open-Meteo Forecast API](https://open-meteo.com/en/docs), using Europe/Berlin local dates and Unix timestamps across daylight-saving changes. The default location is Garching at approximately 48.25° N, 11.65° E. Set `GARCHING_WEATHER_LATITUDE` and `GARCHING_WEATHER_LONGITUDE` in the controller's environment to override it. Pi OS supplies the IANA timezone database; a Windows development environment may need `tzdata` or an injected timezone in hardware-free previews. No runtime dependency has been added.
+
+Fetching runs in a background thread every ten minutes, with an eight-second request timeout and a one-minute retry after failure. Missing measurements show `--`. A failed refresh or data at least twenty minutes old marks cards `OLD`; data at least two hours old is replaced with `WEATHER / UNAVAILABLE`. Initial requests show `LOADING`. Cached daily values are selected by their local date, so yesterday's high and low are not labelled as today's.
+
+Messages accept up to 280 characters across two lines. Short lines stay still; long lines scroll at twelve pixels per second with a two-second pause at each end. Latin accents and German umlauts are transliterated to the matrix font, while unsupported characters such as emoji are rejected. Invalid submissions keep the current mode running and show an error beside the form. Text is passed as a subprocess argument and is never executed as a shell command. The last submitted message remains in controller memory until restart; messages are not saved to disk.
+
+`matrix_text.py` shares text layout between both modes and caches glyph images so scrolling frames only crop pixels. Both new modes use `effect_runner.py` for matrix ownership, frame pacing, and clearing on exit. Deploy `weather.py`, `message.py`, and `matrix_text.py` alongside the updated controller and template in the existing flat `/home/ben` layout. Follow the staged tests and recovery procedure below before replacing live files.
+
 ## Hardware-free tests
 
 On the prepared Pi, the existing dependencies support:
