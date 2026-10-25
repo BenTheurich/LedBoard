@@ -85,10 +85,10 @@ def kill_current_process():
 
 @app.route("/")
 def index():
-    return controller_page(message_sent=request.args.get("sent") == "1")
+    return controller_page()
 
 
-def controller_page(message_error=None, message_value=None, message_sent=False):
+def controller_page(message_error=None, message_value=None):
     with switch_lock:
         selected_script = active_script_name
         saved_message = last_message
@@ -96,7 +96,6 @@ def controller_page(message_error=None, message_value=None, message_sent=False):
         "index.html", groups=MODE_GROUPS, active_script=selected_script,
         message_value=saved_message if message_value is None else message_value,
         message_error=message_error, max_message_length=MAX_MESSAGE_LENGTH,
-        message_sent=message_sent and selected_script == "Message Board",
     )
 
 
@@ -134,7 +133,7 @@ def send_message():
         # One argument also preserves messages beginning with '-' for argparse.
         switch_program("Message Board", ("--message=" + message,))
         last_message = message
-    return redirect("/?sent=1#message")
+    return redirect("/#message")
 
 
 @app.errorhandler(413)

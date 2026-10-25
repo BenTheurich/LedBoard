@@ -1,7 +1,8 @@
-"""Garching weather cards for the 64x16 board; imports never touch SPI."""
+"""Four-point Garching forecast for the 64x16 board; imports never touch SPI."""
 
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from http.client import HTTPException
 import json
 import math
@@ -12,15 +13,22 @@ from urllib.parse import urlencode
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
 
+from PIL import Image, ImageDraw
+from luma.core.legacy import text, textsize
+from luma.core.legacy.font import TINY_FONT, proportional
+
 from matrix_text import panel_duration, render_lines
 
 
 PAGE_SECONDS = 4.0
+OVERVIEW_SECONDS = 16.0
+OVERVIEW_HOURS = (8, 12, 16, 20)
 REFRESH_SECONDS = 600
 RETRY_SECONDS = 60
 STALE_SECONDS = 1200
 EXPIRE_SECONDS = 7200
 MAX_RESPONSE_BYTES = 256 * 1024
+_FONT = proportional(TINY_FONT)
 
 
 @dataclass(frozen=True)
@@ -148,10 +156,8 @@ def fetch_forecast(tz=None):
     return parse_forecast(json.loads(body), tz)
 
 
-def temperature_pair(celsius):
-    if celsius is None:
-        return "--C / --F"
-    return f"{round(celsius)}C / {round(celsius * 9 / 5 + 32)}F"
+def _temperature(celsius):
+    return "--" if celsius is None else str(round(celsius))
 
 
 def condition_label(code):
@@ -188,30 +194,52 @@ def _amount(value):
     return "--mm" if value is None else f"{value:.1f}mm"
 
 
-def forecast_pages(forecast, now, tz):
-    local_now = datetime.fromtimestamp(now, tz)
-    pages = [("NOW " + temperature_pair(forecast.temperature), condition_label(forecast.condition)),
-             ("FEELS " + temperature_pair(forecast.apparent),
-              "WIND --" if forecast.wind is None else f"WIND {forecast.wind:.0f}km/h")]
-    day = next((day for day in forecast.days if day.date == local_now.date().isoformat()), None)
-    if day is None:
-        pages.append(("TODAY", "NO FORECAST"))
-    else:
-        pages.extend([("TODAY HIGH", temperature_pair(day.high)),
-                      ("TODAY LOW", temperature_pair(day.low)),
-                      ("RAIN/SNOW " + _probability(day.probability), "TODAY " + _amount(day.precipitation))])
-    # Unix comparisons keep the six upcoming hours correct across DST changes.
-    upcoming = [hour for hour in forecast.hours if hour.timestamp >= now][:6]
-    for hour in upcoming:
+def overview_points(forecast, now, tz):
+    """Keep the same four points for today's date, including hours already past."""
+    today = datetime.fromtimestamp(now, tz).date()
+    by_hour = {}
+    for hour in forecast.hours:
         local = datetime.fromtimestamp(hour.timestamp, tz)
-        prefix = local.strftime("%Hh")
-        if local.date() != local_now.date():
-            prefix = "TMR " + prefix
-        temp = "--C" if hour.temperature is None else f"{round(hour.temperature)}C"
-        pages.append((prefix + " " + temp, _probability(hour.probability) + " " + _amount(hour.precipitation)))
-    if not upcoming:
-        pages.append(("NEXT HOURS", "NO FORECAST"))
-    return pages
+        if local.date() == today and local.minute == 0:
+            by_hour[local.hour] = hour
+    return tuple((hour, by_hour.get(hour)) for hour in OVERVIEW_HOURS)
+
+
+@lru_cache(maxsize=8)
+def render_overview(points):
+    """Four 16px columns: time, Celsius temperature, precipitation-chance bar."""
+    image = Image.new("1", (64, 16), 0)
+    draw = ImageDraw.Draw(image)
+    for index, (hour, forecast) in enumerate(points):
+        left = index * 16
+        temperature = _temperature(forecast.temperature if forecast else None) + "C"
+        # Extreme signed three-digit values fit without the repeated unit suffix.
+        if textsize(temperature, _FONT)[0] > 16:
+            temperature = temperature[:-1]
+        for value, top in ((f"{hour:02d}", -1), (temperature, 5)):
+            width, _ = textsize(value, _FONT)
+            text(draw, (left + (16 - width) // 2, top), value, fill="white", font=_FONT)
+        probability = forecast.probability if forecast else None
+        if probability is None:
+            text(draw, (left + 6, 10), "?", fill="white", font=_FONT)
+        elif probability > 0:
+            # Keep even a small nonzero chance visible on the four-pixel scale.
+            height = min(4, math.ceil(probability / 25))
+            draw.rectangle((left + 3, 16 - height, left + 12, 15), fill="white")
+    return image
+
+
+def forecast_pages(forecast, now, tz):
+    """Two brief detail cards; the four-point overview gets most screen time."""
+    today = datetime.fromtimestamp(now, tz).date().isoformat()
+    day = next((day for day in forecast.days if day.date == today), None)
+    high_low = "TODAY --" if day is None else f"H{_temperature(day.high)} L{_temperature(day.low)}"
+    current = f"NOW {_temperature(forecast.temperature)}C {high_low}"
+    rain = ("WET " + _probability(day.probability if day else None)
+            + " " + _amount(day.precipitation if day else None))
+    wind = "--" if forecast.wind is None else str(round(forecast.wind))
+    return [(current, condition_label(forecast.condition)),
+            (rain, f"FEEL {_temperature(forecast.apparent)}C W{wind}km/h")]
 
 
 class Weather:
@@ -247,25 +275,34 @@ class Weather:
         while True:
             time.sleep(REFRESH_SECONDS if self.refresh() else RETRY_SECONDS)
 
-    def pages(self):
+    def _state(self):
         now = self.clock()
         with self.lock:
             forecast, updated, failed = self.forecast, self.updated_at, self.failed
         if forecast is None:
-            return [("WEATHER", "UNAVAILABLE" if failed else "LOADING")]
+            return None, now, ("WEATHER", "UNAVAILABLE" if failed else "LOADING")
         age = max(0, now - updated,
                   now - forecast.current_at if forecast.current_at is not None else 0)
         if age >= EXPIRE_SECONDS:
-            return [("WEATHER", "UNAVAILABLE")]
-        pages = forecast_pages(forecast, now, self.tz)
+            return None, now, ("WEATHER", "UNAVAILABLE")
         if failed or age >= STALE_SECONDS:
-            pages = [("OLD " + top, bottom) for top, bottom in pages]
-        return pages
+            return None, now, ("WEATHER OLD", "RETRYING")
+        return forecast, now, None
+
+    def pages(self):
+        forecast, now, status = self._state()
+        return [status] if status else forecast_pages(forecast, now, self.tz)
 
     def render(self, elapsed, delta):
-        pages = self.pages()
+        forecast, now, status = self._state()
+        if status:
+            return render_lines(status, elapsed)
+        pages = forecast_pages(forecast, now, self.tz)
         durations = [panel_duration(page, minimum=PAGE_SECONDS) for page in pages]
-        remaining = max(0.0, elapsed) % sum(durations)
+        remaining = max(0.0, elapsed) % (OVERVIEW_SECONDS + sum(durations))
+        if remaining < OVERVIEW_SECONDS:
+            return render_overview(overview_points(forecast, now, self.tz))
+        remaining -= OVERVIEW_SECONDS
         for page, duration in zip(pages, durations):
             if remaining < duration:
                 return render_lines(page, remaining)
