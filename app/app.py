@@ -12,6 +12,9 @@ SCRIPTS = {
     "Bus Timetable": "my_bus_script3.py",
     "Pong": "pong_explode2.py",
     "Music Visualizer": "visualizations.py",
+    "Falling Sand": "falling_sand.py",
+    "Drawing Harmonograph": "harmonograph.py",
+    "Acid Rain": "acid_rain.py",
     "OFF": "clear_screen.py"
 }
 

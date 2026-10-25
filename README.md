@@ -29,6 +29,9 @@ The installed programs use SPI bus 0, device 0, with `cascaded=16`, `block_orien
 | Bus Timetable | [my_bus_script3.py](app/my_bus_script3.py) | Two-row scrolling departures with day/night brightness |
 | Pong | [pong_explode2.py](app/pong_explode2.py) | Animated Pong with particle effects |
 | Music Visualizer | [visualizations.py](app/visualizations.py) | Simulated spectrum bars; no audio input |
+| Falling Sand | [falling_sand.py](app/falling_sand.py) | Starts empty, pours, reverses gravity, drains, and repeats |
+| Drawing Harmonograph | [harmonograph.py](app/harmonograph.py) | Looping trace with a gradually dotted tail |
+| Acid Rain | [acid_rain.py](app/acid_rain.py) | Matrix-style streams with dissolving bottom splashes |
 | TURN OFF | [clear_screen.py](app/clear_screen.py) | Clears the matrix |
 
 The bus program queries MVG through the Python `mvg` package for **Garching, Untere Straßäcker**, filtering lines **230**, **292**, and **X205** toward **Forschungszentrum**. It displays X205 as `205`. U6 departures at Garching-Forschungszentrum were part of the original goal and are not implemented in this selected program.
@@ -55,7 +58,7 @@ The helper uses SSH user `ben`, address `100.111.233.84`, and host-key alias `ga
 
 ## Repository contents
 
-- `app/`: the controller, six display programs, shared pixel-mapping/timing helpers, and `templates/index.html`.
+- `app/`: the controller, nine display programs, shared rendering/timing helpers, and `templates/index.html`.
 - `requirements.txt`: observed versions of the application's direct Python dependencies; native Pi dependencies are documented separately.
 - `docs/application.md`: runtime versions, working-directory requirements, and the existing cron startup.
 - `docs/pi-app-snapshot.json`: import timestamp, source paths, and SHA-256 hashes for the eight imported files.
@@ -70,7 +73,7 @@ The helper uses SSH user `ben`, address `100.111.233.84`, and host-key alias `ga
 python -m unittest discover -s tests -v
 ```
 
-The tests require Flask, Pillow, and luma.core, and run without initializing GPIO or SPI. They verify concurrent switching, child cleanup, the pixel mapping, frame pacing, and clock redraws. See [application documentation](docs/application.md) for a desktop test environment and deployment notes.
+The tests require Flask, Pillow, and luma.core, and run without initializing GPIO or SPI. They verify concurrent switching, child cleanup, pixel mapping, frame pacing, clock redraws, repeated sand cycles, and bounded visualization state. See [application documentation](docs/application.md) for a desktop test environment and deployment notes.
 
 ## Possible next work
 

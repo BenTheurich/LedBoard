@@ -157,6 +157,20 @@ class ControllerTests(unittest.TestCase):
         self.assertIs(controller.current_process, process)
         self.assertEqual(controller.active_script_name, "Clock")
 
+    def test_selected_visuals_are_available_on_the_main_panel(self):
+        expected = {"Falling Sand": "falling_sand.py", "Drawing Harmonograph": "harmonograph.py", "Acid Rain": "acid_rain.py"}
+        with patch.object(controller.subprocess, "run"), patch.object(controller.subprocess, "Popen") as spawn:
+            client = controller.app.test_client()
+            for name, script in expected.items():
+                with self.subTest(mode=name):
+                    response = client.post("/run", data={"script_name": name})
+                    self.assertEqual(response.status_code, 302)
+                    spawn.assert_called_with(["python3", script])
+                    self.assertEqual(controller.active_script_name, name)
+        html = controller.app.test_client().get("/").get_data(as_text=True)
+        for name in expected:
+            self.assertIn(name, html)
+
 
 if __name__ == "__main__":
     unittest.main()
