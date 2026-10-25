@@ -13,15 +13,33 @@ import clock
 
 
 class ClockTests(unittest.TestCase):
-    def test_rendering_preserves_original_clock_pixels(self):
+    def test_rendering_uses_centered_fixed_width_digit_cells(self):
         font = proportional(CP437_FONT)
-        for value in ("00:00:00", "12:34:56", "23:59:59"):
-            width, _ = textsize(value, font)
-            tiny = Image.new("1", (width, 8), 0)
-            text(ImageDraw.Draw(tiny), (0, 0), value, fill="white", font=font)
-            expected = Image.new("1", (64, 16), 0)
-            expected.paste(tiny.resize((width, 16), Image.Resampling.NEAREST), ((64 - width) // 2, 0))
-            self.assertEqual(clock.render_clock_image(value, font).tobytes(), expected.tobytes())
+        # CP437's widest proportional digit is 8 pixels; colons occupy 3.
+        self.assertEqual(max(textsize(digit, font)[0] for digit in "0123456789"), 8)
+        self.assertEqual(textsize(":", font)[0], 3)
+        positions = (5, 13, 21, 24, 32, 40, 43, 51)
+        for value in ("00:00:00", "11:11:11", "12:34:56", "23:59:59"):
+            with self.subTest(value=value):
+                expected = Image.new("1", (64, 8), 0)
+                draw = ImageDraw.Draw(expected)
+                for character, x in zip(value, positions):
+                    text(draw, (x, 0), character, fill="white", font=font)
+                expected = expected.resize((64, 16), Image.Resampling.NEAREST)
+                image = clock.render_clock_image(value, font)
+                self.assertEqual(image.size, (64, 16))
+                self.assertEqual(image.tobytes(), expected.tobytes())
+
+    def test_separators_remain_at_the_same_positions_for_narrow_and_wide_times(self):
+        font = proportional(CP437_FONT)
+        marker = Image.new("1", (3, 8), 0)
+        text(ImageDraw.Draw(marker), (0, 0), ":", fill="white", font=font)
+        marker = marker.resize((3, 16), Image.Resampling.NEAREST)
+        for value in ("00:00:00", "11:11:11", "04:10:40", "23:59:59"):
+            with self.subTest(value=value):
+                image = clock.render_clock_image(value, font)
+                for x in (21, 40):
+                    self.assertEqual(image.crop((x, 0, x + 3, 16)).tobytes(), marker.tobytes())
 
     def test_duplicate_second_is_not_redrawn_and_sleep_uses_remaining_time(self):
         device = Mock()

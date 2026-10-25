@@ -1,14 +1,7 @@
 import random
+import time
 from PIL import Image, ImageDraw
-from luma.core.interface.serial import spi, noop
-from luma.led_matrix.device import max7219
 from display_utils import FramePacer, map_serpentine
-
-# --- HARDWARE SETUP ---
-serial = spi(port=0, device=0, gpio=noop())
-# 16 Matrices (16x64 Serpentine)
-device = max7219(serial, cascaded=16, block_orientation=-90, rotate=0)
-device.contrast(16)
 
 # --- LOGICAL DIMENSIONS ---
 WIDTH = 64
@@ -28,9 +21,9 @@ class MatrixRain:
             'speed': random.choice([0.5, 1, 1.5]) 
         })
 
-    def step(self):
+    def step(self, elapsed):
         for drop in self.drops:
-            drop['y'] += drop['speed']
+            drop['y'] += drop['speed'] * elapsed * 8
         
         # Remove drops that hit bottom and respawn
         self.drops = [d for d in self.drops if d['y'] < HEIGHT]
@@ -54,11 +47,13 @@ class CylonScanner:
         self.direction = 1
         self.width = 8 
 
-    def step(self):
-        self.x += self.direction
+    def step(self, elapsed):
+        self.x += self.direction * elapsed * 8
         if self.x + self.width >= WIDTH:
+            self.x = WIDTH - self.width
             self.direction = -1
         if self.x <= 0:
+            self.x = 0
             self.direction = 1
 
     def draw(self, draw):
@@ -67,19 +62,27 @@ class CylonScanner:
 # --- ANIMATION 3: FAKE AUDIO SPECTRUM ---
 class AudioSpectrum:
     def __init__(self):
-        # 32 bars, 2px wide each
-        self.bars = [random.randint(0, HEIGHT) for _ in range(WIDTH // 2)] 
+        # Keep the relaxed original tempo while rendering intermediate frames.
+        self.period = 1.0 / 8
+        self.elapsed = 0.0
+        self.bars = [random.randint(0, HEIGHT) for _ in range(WIDTH // 2)]
+        self.targets = self.next_targets()
 
-    def step(self):
-        pass 
+    def next_targets(self):
+        return [max(0, min(HEIGHT, height + random.randint(-3, 3))) for height in self.bars]
+
+    def step(self, elapsed):
+        self.elapsed += elapsed
+        # Tolerance avoids losing a step to fractional frame-interval rounding.
+        while self.elapsed + 1e-12 >= self.period:
+            self.bars = self.targets
+            self.targets = self.next_targets()
+            self.elapsed = max(0.0, self.elapsed - self.period)
 
     def draw(self, draw):
-        for i, height in enumerate(self.bars):
-            # Jitter the height
-            change = random.randint(-3, 3)
-            # Clamp between 0 and 16
-            new_height = max(0, min(HEIGHT, height + change))
-            self.bars[i] = new_height
+        progress = self.elapsed / self.period
+        for i, (height, target) in enumerate(zip(self.bars, self.targets)):
+            new_height = int(round(height + (target - height) * progress))
             
             x = i * 2
             
@@ -92,29 +95,29 @@ class AudioSpectrum:
                 
                 draw.rectangle((x, y_top, x + 1, y_bottom), fill="white")
 
-# --- MAIN SELECTION ---
-# UNCOMMENT THE MODE YOU WANT
-# mode = CylonScanner()
-mode = AudioSpectrum()
-# mode = MatrixRain()
+def main():
+    from luma.core.interface.serial import spi, noop
+    from luma.led_matrix.device import max7219
 
-print("Starting Visualizer...")
-pacer = FramePacer(25)
+    serial = spi(port=0, device=0, gpio=noop())
+    device = max7219(serial, cascaded=16, block_orientation=-90, rotate=0)
+    device.contrast(16)
+    mode = AudioSpectrum()
+    print("Starting Visualizer...")
+    pacer = FramePacer(25)
+    previous = time.monotonic()
+    try:
+        while True:
+            now = time.monotonic()
+            mode.step(now - previous)
+            previous = now
+            img = Image.new("1", (WIDTH, HEIGHT), 0)
+            mode.draw(ImageDraw.Draw(img))
+            device.display(map_serpentine(img))
+            pacer.wait()
+    except KeyboardInterrupt:
+        pass
 
-try:
-    while True:
-        # 1. Create a clean virtual image
-        img = Image.new("1", (WIDTH, HEIGHT), 0)
-        draw = ImageDraw.Draw(img)
-        
-        # 2. Update and Draw animation to virtual image
-        if hasattr(mode, 'step'):
-            mode.step()
-        mode.draw(draw)
-        
-        # 3. Map virtual image to physical hardware
-        device.display(map_serpentine(img))
-        pacer.wait()
 
-except KeyboardInterrupt:
-    pass
+if __name__ == "__main__":
+    main()

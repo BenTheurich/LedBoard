@@ -7,12 +7,21 @@ from display_utils import map_serpentine
 
 
 def render_clock_image(time_str, font):
-    """Preserve the original stretched clock font and centering."""
+    """Keep digit cells and separators fixed as the displayed time changes."""
     from luma.core.legacy import text, textsize
 
-    width, _ = textsize(time_str, font)
+    digit_width = max(textsize(digit, font)[0] for digit in "0123456789")
+    colon_width, _ = textsize(":", font)
+    width = 6 * digit_width + 2 * colon_width
     tiny = Image.new("1", (width, 8), 0)
-    text(ImageDraw.Draw(tiny), (0, 0), time_str, fill="white", font=font)
+    draw = ImageDraw.Draw(tiny)
+    x = 0
+    for character in time_str:
+        cell_width = colon_width if character == ":" else digit_width
+        glyph_width, _ = textsize(character, font)
+        text(draw, (x + (cell_width - glyph_width) // 2, 0), character,
+             fill="white", font=font)
+        x += cell_width
     stretched = tiny.resize((width, 16), resample=Image.Resampling.NEAREST)
     image = Image.new("1", (64, 16), 0)
     image.paste(stretched, ((64 - width) // 2, 0))

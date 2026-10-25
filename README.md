@@ -4,7 +4,7 @@ A wall-mounted transit departure display for Garching, built with a Raspberry Pi
 
 ## Project status
 
-The board is assembled and running. Its Flask controller, display programs, and HTML template were imported from the Pi on 2026-10-25, with source-file hashes checked during transfer. The current code adds serialized program switching, faster pixel mapping, paced animation frames, and a clock that redraws only when the displayed second changes. The original import remains recorded in [pi-app-snapshot.json](docs/pi-app-snapshot.json) and Git commit `88a40b9`.
+The board is assembled and running. Its Flask controller, display programs, and HTML template were imported from the Pi on 2026-10-25, with source-file hashes checked during transfer. The current code adds serialized program switching, faster pixel mapping, paced animation frames, and a fixed-width clock that redraws only when the displayed second changes. The visualizer interpolates slower animation updates between frames. The original import remains recorded in [pi-app-snapshot.json](docs/pi-app-snapshot.json) and Git commit `88a40b9`.
 
 Open the [controller](http://garching-board.local:5000/) on the local network. If local hostname discovery is unavailable, the controller is also reachable at `http://100.111.233.84:5000/` while connected to the same Tailscale network. It starts through the existing cron `@reboot` entry.
 
@@ -24,7 +24,7 @@ The installed programs use SPI bus 0, device 0, with `cascaded=16`, `block_orien
 
 | Controller button | Source | Behavior |
 | --- | --- | --- |
-| Clock | [clock.py](app/clock.py) | Stretched hours, minutes, and seconds |
+| Clock | [clock.py](app/clock.py) | Stretched hours, minutes, and seconds in fixed-width digit cells |
 | Game of Life | [game_of_life.py](app/game_of_life.py) | Cellular automaton |
 | Bus Timetable | [my_bus_script3.py](app/my_bus_script3.py) | Two-row scrolling departures with day/night brightness |
 | Pong | [pong_explode2.py](app/pong_explode2.py) | Animated Pong with particle effects |

@@ -13,7 +13,7 @@ cd /path/to/garching-board/app
 python3 app.py
 ```
 
-Do not start a second controller or display program while another process owns the matrices. The controller and clock now defer hardware initialization until execution so tests can import them safely. Other display programs still initialize SPI at import and must not be imported for an ordinary desktop syntax check.
+Do not start a second controller or display program while another process owns the matrices. The controller, clock, and visualizer defer hardware initialization until execution so tests can import them safely. Other display programs still initialize SPI at import and must not be imported for an ordinary desktop syntax check.
 
 The controller binds to `0.0.0.0:5000` with Flask debug mode disabled. At startup it tries to scroll its local IP address on the display. It then starts the web controller with the selected-program indicator set to OFF; there is no saved-mode restoration in the imported code. The page's `/run` POST route switches display programs.
 
@@ -37,7 +37,9 @@ Program switches hold a lock across child termination, clearing, spawning, and s
 
 `display_utils.map_serpentine` uses Pillow crop, rotation, and paste operations instead of Python per-pixel loops. The visualizer, clock, bus scroll, and startup IP message share it. Pong's sparse point drawing is retained.
 
-Visualizer and Pong target 25 frames per second with a monotonic deadline that includes rendering and SPI time. An overrun resets the schedule without a burst of catch-up frames. The animations still advance one step per rendered frame, so they can slow down if the Pi cannot sustain the target rate. The clock keeps its original stretched font and layout but writes only when `HH:MM:SS` changes, sleeping until the next wall-clock second.
+Visualizer and Pong target 25 frames per second with a monotonic deadline that includes rendering and SPI time. An overrun resets the schedule without a burst of catch-up frames. The spectrum chooses new targets at eight updates per second and interpolates its bar heights using elapsed time, so higher rendering rates do not make its motion frantic. Pong still advances one physics step per rendered frame. The startup IP message scrolls at 12 pixels per second.
+
+The clock uses the original CP437 font and 16-pixel stretch. Every digit has an eight-pixel cell, matching the widest digit; each colon has a three-pixel cell. This keeps the entire clock 54 pixels wide, centered at x=5, with fixed separator positions as the time changes. It writes only when `HH:MM:SS` changes, sleeping until the next wall-clock second.
 
 ## Hardware-free tests
 
@@ -57,7 +59,7 @@ python -m pip install --no-deps luma.core==2.4.2
 python -m unittest discover -s tests -v
 ```
 
-The suite compares the bulk mapping with the original pixel loop, checks every logical pixel's location, verifies pacing through a fake clock, checks clock image equivalence and second-change redraws, and exercises concurrent Flask requests with fake subprocesses.
+The suite compares the bulk mapping with the original pixel loop, checks every logical pixel's location, verifies pacing through a fake clock, checks fixed clock-cell/separator positions and second-change redraws, checks spectrum interpolation independently of render rate, and exercises concurrent Flask requests with fake subprocesses.
 
 ## Deployment and recovery
 

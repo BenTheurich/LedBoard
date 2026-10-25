@@ -50,7 +50,8 @@ def show_ip_on_matrix(ip_addr):
     img = Image.new("1", (w + 128, 16), 0)
     draw = ImageDraw.Draw(img)
     text(draw, (64, 4), msg, fill="white", font=font)
-    pacer = FramePacer(50)
+    # One pixel per frame at a readable speed, independent of render cost.
+    pacer = FramePacer(12)
     for _ in range(2):
         for x in range(w + 128 - 64):
             device.display(map_serpentine(img.crop((x, 0, x + 64, 16))))
