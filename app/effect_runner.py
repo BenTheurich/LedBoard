@@ -33,9 +33,11 @@ def run(effect):
             previous = now
             image = effect.render(elapsed, delta)
             phase = getattr(effect, "phase", None)
-            if phase is not None and phase != previous_phase:
+            grains = getattr(effect, "grains", None)
+            cycles = getattr(effect, "completed_cycles", None)
+            if isinstance(phase, str) and grains is not None and cycles is not None and phase != previous_phase:
                 print(f"{type(effect).__name__} phase={phase} "
-                      f"grains={effect.grains} cycles={effect.completed_cycles}", flush=True)
+                      f"grains={grains} cycles={cycles}", flush=True)
                 previous_phase = phase
             if image.mode != "1" or image.size != (64, 16):
                 raise ValueError("Effect must render a monochrome 64x16 image")
