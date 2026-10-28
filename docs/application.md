@@ -33,7 +33,7 @@ For a future deployment at another path, update the working directory and startu
 
 ## Rendering and switching
 
-The single-owner revision is local and pending preview approval. The live board still runs release `beef417d19d4a2098cbece0b38ef5f32174a9517` until a separate deployment is authorized.
+Deployments record the installed revision and verification results in their backup directory. Source changes reach the board through the deployment procedure below.
 
 The controller holds the switch lock across worker replacement and selection-state updates. `display_owner.py` keeps the matrix open on one dedicated thread, including during the startup IP scroll. Mode workers never open SPI. Erasure begins from the owner's last displayed frame before the old worker is stopped or the next worker is spawned, so process cleanup and imports cannot create a gap between passes. A worker that ignores termination is killed and reaped after two seconds; the display thread keeps animating throughout that wait.
 
