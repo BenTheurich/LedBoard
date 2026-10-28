@@ -283,6 +283,11 @@ class Weather:
         while True:
             time.sleep(REFRESH_SECONDS if self.refresh() else RETRY_SECONDS)
 
+    @property
+    def ready(self):
+        with self.lock:
+            return self.forecast is not None or self.failed
+
     def _state(self):
         now = self.clock()
         with self.lock:

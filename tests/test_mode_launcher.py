@@ -1,97 +1,125 @@
+from contextlib import contextmanager
+import importlib.abc
+import io
 import os
 from pathlib import Path
 import sys
-from types import ModuleType
 import unittest
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 import mode_launcher
+from frame_transport import FIRST, FRAME_BYTES, FrameProducer, decode_frames
+
+
+class RejectHardwareImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.startswith(("spidev", "RPi", "lgpio", "smbus", "luma.led_matrix",
+                                "luma.core.interface.serial")):
+            raise AssertionError(f"Worker tried to load hardware module {fullname}")
+
+
+@contextmanager
+def virtual_modules(producer):
+    import luma
+    import luma.core.interface
+
+    with patch.dict(sys.modules), patch.object(luma, "led_matrix", None, create=True), \
+            patch.object(luma.core.interface, "serial", None, create=True), \
+            patch.object(sys, "meta_path", [RejectHardwareImports(), *sys.meta_path]):
+        for name in list(sys.modules):
+            if name.startswith(("luma.led_matrix", "luma.core.interface.serial")):
+                del sys.modules[name]
+        mode_launcher.install_frame_producer(producer)
+        yield
 
 
 class LauncherTests(unittest.TestCase):
-    def test_preparation_imports_modules_without_initializing_hardware(self):
-        serial = ModuleType("luma.core.interface.serial")
-        serial.spi, serial.noop = Mock(), Mock()
-        matrix = ModuleType("luma.led_matrix.device")
-        matrix.max7219 = Mock()
-        render = ModuleType("luma.core.render")
-        render.canvas = Mock()
-        modules = {"clock": ModuleType("clock"), "luma.core.interface.serial": serial,
-                   "luma.led_matrix": ModuleType("luma.led_matrix"),
-                   "luma.led_matrix.device": matrix, "luma.core.render": render}
-        with patch.dict(sys.modules, modules):
-            mode_launcher.prepare_mode("clock.py")
-        serial.spi.assert_not_called()
-        matrix.max7219.assert_not_called()
-        render.canvas.assert_not_called()
-
-    def test_go_precedes_handoff_installation_and_script_execution(self):
-        ready_read, ready_write = os.pipe()
-        go_read, go_write = os.pipe()
-        os.set_blocking(ready_read, False)
-        os.write(go_write, b"G")
-        events = []
-
-        def prepare(filename):
-            self.assertEqual(filename, "message.py")
-            with self.assertRaises(BlockingIOError):
-                os.read(ready_read, 1)
-            events.append("prepared")
-
-        def install():
-            self.assertEqual(os.read(ready_read, 1), b"R")
-            # The bootstrap has consumed GO and closed its handoff channel.
-            with self.assertRaises(OSError):
-                os.fstat(go_read)
-            events.append("installed")
-
-        def run(filename, run_name):
-            self.assertEqual(events, ["prepared", "installed"])
-            self.assertEqual((filename, run_name), ("message.py", "__main__"))
-            self.assertEqual(sys.argv, ["message.py", "--message=--literal"])
-            events.append("ran")
-
+    def test_virtual_hardware_imports_and_real_canvas_send_physical_pixels(self):
+        frame_read, frame_write = os.pipe()
+        resume_read, resume_write = os.pipe()
+        producer = FrameProducer(frame_write, resume_read)
         try:
-            with patch.object(mode_launcher, "prepare_mode", side_effect=prepare), \
-                    patch.object(mode_launcher, "install_handoff", side_effect=install), \
-                    patch.object(mode_launcher.runpy, "run_path", side_effect=run), \
-                    patch.object(sys, "argv", ["mode_launcher.py"]):
-                mode_launcher.main(["--ready-fd", str(ready_write), "--go-fd", str(go_read),
-                                    "--", "message.py", "--message=--literal"])
-            self.assertEqual(events, ["prepared", "installed", "ran"])
-        finally:
-            for descriptor in (ready_read, ready_write, go_read, go_write):
-                try:
-                    os.close(descriptor)
-                except OSError:
-                    pass
+            os.write(resume_write, b"G")
+            with virtual_modules(producer):
+                from luma.core.interface.serial import noop, spi
+                from luma.led_matrix.device import max7219
+                from luma.core.render import canvas
 
-    def test_eof_or_invalid_go_cannot_execute_a_mode(self):
-        for signal in (b"", b"X"):
-            with self.subTest(signal=signal):
-                ready_read, ready_write = os.pipe()
-                go_read, go_write = os.pipe()
-                if signal:
-                    os.write(go_write, signal)
-                os.close(go_write)
-                try:
-                    with patch.object(mode_launcher, "prepare_mode"), \
-                            patch.object(mode_launcher, "install_handoff") as install, \
-                            patch.object(mode_launcher.runpy, "run_path") as run:
-                        try:
-                            mode_launcher.main(["--ready-fd", str(ready_write), "--go-fd", str(go_read),
-                                                "--", "clock.py"])
-                        except (SystemExit, RuntimeError, ValueError):
-                            pass
-                    run.assert_not_called()
-                    install.assert_not_called()
-                finally:
-                    for descriptor in (ready_read, ready_write, go_read):
-                        try:
-                            os.close(descriptor)
-                        except OSError:
-                            pass
+                serial = spi(port=0, device=0, gpio=noop())
+                device = max7219(serial, cascaded=16, rotate=0, block_orientation=-90)
+                self.assertIs(device, producer)
+                self.assertEqual((device.mode, device.size, device.width, device.height, device.rotate),
+                                 ("1", (128, 8), 128, 8, 0))
+                self.assertEqual(device.bounding_box, (0, 0, 127, 7))
+                device.contrast(32)
+                with canvas(device) as draw:
+                    draw.rectangle(device.bounding_box, fill="black")
+                    draw.point((0, 0), fill="white")
+                    draw.point((127, 7), fill="white")
+                kind, contrast, image = decode_frames(bytearray(os.read(frame_read, FRAME_BYTES)))[0]
+                self.assertEqual((kind, contrast), (FIRST, 32))
+                self.assertEqual(image.getpixel((0, 0)), 255)
+                self.assertEqual(image.getpixel((127, 7)), 255)
+                self.assertEqual(sum(bool(pixel) for pixel in image.getdata()), 2)
+                serial.cleanup()
+        finally:
+            producer.cleanup()
+            os.close(frame_read)
+            os.close(resume_write)
+
+    def test_virtual_matrix_rejects_other_physical_configurations(self):
+        producer = Mock()
+        with virtual_modules(producer):
+            from luma.led_matrix.device import max7219
+
+            expected = {"cascaded": 16, "rotate": 0, "block_orientation": -90}
+            for change in ({"cascaded": 8}, {"rotate": 1}, {"block_orientation": 90},
+                           {"width": 16}, {"blocks_arranged_in_reverse_order": True}):
+                with self.subTest(change=change), self.assertRaises(ValueError):
+                    max7219(None, **(expected | change))
+
+    def test_adapter_is_installed_before_running_script_and_preserves_arguments(self):
+        for filename in ("message.py", "drawing.py"):
+            with self.subTest(filename=filename):
+                producer = Mock()
+                events = []
+
+                def install(device):
+                    self.assertIs(device, producer)
+                    events.append("installed")
+
+                def run(path, run_name):
+                    self.assertEqual(events, ["installed"])
+                    self.assertEqual((path, run_name), (filename, "__main__"))
+                    self.assertEqual(sys.argv, [filename, "--message=--literal"])
+
+                with patch.object(mode_launcher, "FrameProducer", return_value=producer) as create, \
+                        patch.object(mode_launcher, "install_frame_producer", side_effect=install), \
+                        patch.object(mode_launcher.runpy, "run_path", side_effect=run), \
+                        patch.object(sys, "argv", ["mode_launcher.py"]):
+                    result = mode_launcher.main(["--frame-fd", "11", "--resume-fd", "12",
+                                                 "--", filename, "--message=--literal"])
+                self.assertEqual(result, 0)
+                create.assert_called_once_with(11, 12, allow_blank_first=filename == "drawing.py")
+                producer.cleanup.assert_called_once_with()
+
+    def test_script_failure_closes_transport_descriptors(self):
+        producer = Mock()
+        with patch.object(mode_launcher, "FrameProducer", return_value=producer), \
+                patch.object(mode_launcher, "install_frame_producer"), \
+                patch.object(mode_launcher.runpy, "run_path", side_effect=RuntimeError("mode failed")), \
+                patch.object(sys, "argv", ["mode_launcher.py"]), self.assertRaisesRegex(RuntimeError, "mode failed"):
+            mode_launcher.main(["--frame-fd", "11", "--resume-fd", "12", "--", "clock.py"])
+        producer.cleanup.assert_called_once_with()
+
+    def test_launcher_rejects_path_traversal_and_non_scripts_before_adapter_install(self):
+        for filename in ("../clock.py", "sub/clock.py", r"sub\clock.py", "/tmp/clock.py", "clock.txt"):
+            with self.subTest(filename=filename), patch.object(mode_launcher, "FrameProducer") as create, \
+                    patch("sys.stderr", new_callable=io.StringIO), self.assertRaises(SystemExit) as error:
+                mode_launcher.main(["--frame-fd", "11", "--resume-fd", "12", "--", filename])
+            self.assertEqual(error.exception.code, 2)
+            create.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -31,6 +31,9 @@ def run(effect):
             delta = now - previous
             elapsed += delta
             previous = now
+            # Check before rendering: a fetch completing during render must not
+            # promote the preceding loading snapshot to the first ready frame.
+            ready = getattr(effect, "ready", True)
             image = effect.render(elapsed, delta)
             phase = getattr(effect, "phase", None)
             grains = getattr(effect, "grains", None)
@@ -41,7 +44,8 @@ def run(effect):
                 previous_phase = phase
             if image.mode != "1" or image.size != (64, 16):
                 raise ValueError("Effect must render a monochrome 64x16 image")
-            device.display(map_serpentine(image))
+            display = device.display if ready else getattr(device, "display_loading", device.display)
+            display(map_serpentine(image))
             pacer.wait()
     finally:
         device.clear()

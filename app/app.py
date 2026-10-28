@@ -3,7 +3,8 @@ import threading
 from flask import Flask, jsonify, render_template, request, redirect
 from message import MAX_MESSAGE_LENGTH, validate_message
 from drawing import WIDTH, HEIGHT, validate_pixels
-from mode_switch import ModeStartError, clear_display, get_matrix_device, launch_mode, stop_process
+from mode_switch import (ModeStartError, clear_display, get_display_owner,
+                         launch_mode, shutdown_display, stop_process)
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 4096
@@ -51,8 +52,7 @@ def show_ip_on_matrix(ip_addr):
     from luma.core.legacy.font import proportional, CP437_FONT
     from display_utils import FramePacer, map_serpentine
 
-    device = get_matrix_device()
-    device.contrast(32)
+    display = get_display_owner()
     msg = f"IP: {ip_addr}:5000"
     font = proportional(CP437_FONT)
     w, h = textsize(msg, font)
@@ -64,17 +64,10 @@ def show_ip_on_matrix(ip_addr):
     pacer = FramePacer(12)
     for _ in range(2):
         for x in range(w + 128 - 64):
-            device.display(map_serpentine(img.crop((x, 0, x + 64, 16))))
+            display.show_frame(map_serpentine(img.crop((x, 0, x + 64, 16))), contrast=32)
             pacer.wait()
 
 # --- FLASK ROUTES ---
-def kill_current_process():
-    # Called while switch_lock is held by the program-switch transaction.
-    global current_process
-    if current_process:
-        stop_process(current_process)
-        current_process = None
-
 @app.route("/")
 def index():
     return controller_page()
@@ -93,19 +86,19 @@ def controller_page(message_error=None, message_value="", drawing_error=None):
 
 
 def switch_program(script_name, extra_args=()):
-    """Caller holds switch_lock so every mode has one exclusive display owner."""
+    """Serialize selection changes while the owner continues drawing."""
     global current_process, active_script_name
     print(f"Switching to: {script_name}", flush=True)
-    kill_current_process()
+    previous, current_process = current_process, None
     active_script_name = "OFF"
     if script_name == "OFF":
         try:
-            clear_display()
+            clear_display(previous=previous)
         except Exception as error:
             raise ModeStartError("Could not clear the board. Try again.") from error
     else:
         try:
-            current_process = launch_mode(SCRIPTS[script_name], extra_args)
+            current_process = launch_mode(SCRIPTS[script_name], extra_args, previous=previous)
         except ModeStartError as error:
             raise ModeStartError(f"Could not start {script_name}. Try again.") from error
     active_script_name = script_name
@@ -190,3 +183,6 @@ if __name__ == "__main__":
         if browser_server is not None:
             browser_server.shutdown()
             browser_server.server_close()
+        if current_process is not None:
+            stop_process(current_process)
+        shutdown_display()

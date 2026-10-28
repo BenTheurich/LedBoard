@@ -164,7 +164,8 @@
 
     async function postForm(editor, payload) {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 20000);
+        // Preparation may include a network fetch plus complete wipe passes.
+        const timeout = setTimeout(() => controller.abort(), 35000);
         try {
             const response = await fetch(editor.action, {
                 method: "POST", body: payload,

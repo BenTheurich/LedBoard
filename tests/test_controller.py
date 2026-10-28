@@ -1,15 +1,12 @@
 import importlib.util
 from html.parser import HTMLParser
 from pathlib import Path
-import subprocess
 import sys
 import threading
 import unittest
-from unittest.mock import Mock, call, patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
-from display_utils import STOP_TIMEOUT
-
 spec = importlib.util.spec_from_file_location(
     "garching_controller", Path(__file__).resolve().parents[1] / "app" / "app.py"
 )
@@ -78,11 +75,13 @@ class ControllerTests(unittest.TestCase):
         failures = []
         responses = []
 
-        def spawn(filename, extra_args=()):
+        def spawn(filename, extra_args=(), previous=None):
             if not first_launch_entered.is_set():
                 first_launch_entered.set()
                 if not release_first_launch.wait(timeout=5):
                     raise AssertionError("The first launch was not released")
+            if previous is not None:
+                previous.terminate()
             self.assertFalse(any(process.alive for process in created))
             process = FakeProcess([filename, *extra_args])
             created.append(process)
@@ -123,7 +122,7 @@ class ControllerTests(unittest.TestCase):
         self.assertIs(controller.current_process, created[1])
         self.assertEqual(controller.active_script_name, "Pong")
 
-    def test_off_stops_child_and_clears_without_spawning(self):
+    def test_off_delegates_old_worker_and_clears_without_spawning(self):
         process = Mock()
         controller.current_process = process
         controller.active_script_name = "Clock"
@@ -132,51 +131,62 @@ class ControllerTests(unittest.TestCase):
             response = controller.app.test_client().post("/run", data={"script_name": "OFF"})
 
         self.assertEqual(response.status_code, 302)
-        process.terminate.assert_called_once_with()
-        process.wait.assert_called_once_with(timeout=STOP_TIMEOUT)
-        clear.assert_called_once_with()
+        clear.assert_called_once_with(previous=process)
+        process.terminate.assert_not_called()
         spawn.assert_not_called()
         self.assertIsNone(controller.current_process)
         self.assertEqual(controller.active_script_name, "OFF")
 
-    def test_old_child_is_reaped_before_the_final_off_clear(self):
-        events = []
-        process = Mock()
-        process.terminate.side_effect = lambda: events.append("terminate")
-        process.wait.side_effect = lambda timeout=None: events.append("reaped")
-        controller.current_process = process
-        with patch.object(controller, "clear_display", side_effect=lambda: events.append("clear")), \
-                patch.object(controller, "launch_mode") as launch:
-            response = controller.app.test_client().post("/run", data={"script_name": "OFF"})
+    def test_worker_is_detached_and_selection_off_before_launch(self):
+        previous = Mock()
+        controller.current_process = previous
+        controller.active_script_name = "Clock"
+        worker = Mock()
+
+        def launch(filename, extra_args=(), previous=None):
+            self.assertIsNone(controller.current_process)
+            self.assertEqual(controller.active_script_name, "OFF")
+            return worker
+
+        with patch.object(controller, "launch_mode", side_effect=launch) as launch_mock:
+            response = controller.app.test_client().post("/run", data={"script_name": "Pong"})
+
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(events, ["terminate", "reaped", "clear"])
-        launch.assert_not_called()
+        launch_mock.assert_called_once_with("pong_explode2.py", (), previous=previous)
+        previous.terminate.assert_not_called()
+        self.assertIs(controller.current_process, worker)
+        self.assertEqual(controller.active_script_name, "Pong")
 
     def test_failed_start_reports_an_error_and_keeps_selection_off(self):
         process = FakeProcess(["clock.py"])
         controller.current_process = process
         controller.active_script_name = "Clock"
-        with patch.object(controller, "launch_mode", side_effect=controller.ModeStartError("Worker did not become ready")):
+        with patch.object(controller, "launch_mode", side_effect=controller.ModeStartError("Worker did not become ready")) as launch:
             response = controller.app.test_client().post(
                 "/run", data={"script_name": "Pong"}, headers={"Accept": "application/json"})
         self.assertEqual(response.status_code, 500)
         self.assertIn("error", response.get_json())
         self.assertEqual(response.get_json()["active_script"], "OFF")
-        self.assertFalse(process.alive)
+        launch.assert_called_once_with("pong_explode2.py", (), previous=process)
         self.assertIsNone(controller.current_process)
         self.assertEqual(controller.active_script_name, "OFF")
 
-    def test_timeout_kills_and_reaps_child_before_switching(self):
+    def test_clear_failure_reports_off_after_detaching_worker(self):
         process = Mock()
-        process.wait.side_effect = [subprocess.TimeoutExpired("old-child", STOP_TIMEOUT), 0]
         controller.current_process = process
-        with patch.object(controller, "clear_display"), \
-                patch.object(controller, "launch_mode"):
-            response = controller.app.test_client().post("/run", data={"script_name": "OFF"})
+        controller.active_script_name = "Clock"
+        with patch.object(controller, "clear_display", side_effect=OSError("Matrix failed")) as clear, \
+                patch.object(controller, "launch_mode") as launch:
+            response = controller.app.test_client().post(
+                "/run", data={"script_name": "OFF"}, headers={"Accept": "application/json"})
 
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(process.method_calls, [call.terminate(), call.wait(timeout=STOP_TIMEOUT), call.kill(), call.wait()])
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("Could not clear", response.get_json()["error"])
+        self.assertEqual(response.get_json()["active_script"], "OFF")
+        clear.assert_called_once_with(previous=process)
+        launch.assert_not_called()
         self.assertIsNone(controller.current_process)
+        self.assertEqual(controller.active_script_name, "OFF")
 
     def test_unknown_program_leaves_current_program_untouched(self):
         process = Mock()
@@ -199,9 +209,10 @@ class ControllerTests(unittest.TestCase):
             client = controller.app.test_client()
             for name, script in expected.items():
                 with self.subTest(mode=name):
+                    previous = controller.current_process
                     response = client.post("/run", data={"script_name": name})
                     self.assertEqual(response.status_code, 302)
-                    spawn.assert_called_with(script, ())
+                    spawn.assert_called_with(script, (), previous=previous)
                     self.assertEqual(controller.active_script_name, name)
         html = controller.app.test_client().get("/").get_data(as_text=True)
         for name in expected:
@@ -209,7 +220,9 @@ class ControllerTests(unittest.TestCase):
 
     def test_weather_message_and_drawing_have_exclusive_display_ownership(self):
         created = []
-        def spawn(filename, extra_args=()):
+        def spawn(filename, extra_args=(), previous=None):
+            if previous is not None:
+                previous.terminate()
             process = FakeProcess([filename, *extra_args])
             created.append(process)
             return process
@@ -273,7 +286,7 @@ class ControllerTests(unittest.TestCase):
             response = controller.app.test_client().post("/message", data={"message": value})
         self.assertEqual(response.status_code, 200)
         self.assert_message_field(response.get_data(as_text=True), value)
-        spawn.assert_called_once_with("message.py", ('--message=Grüße!\nCafé "12°"',))
+        spawn.assert_called_once_with("message.py", ('--message=Grüße!\nCafé "12°"',), previous=None)
 
     def test_json_submissions_report_the_selected_mode(self):
         client = controller.app.test_client()

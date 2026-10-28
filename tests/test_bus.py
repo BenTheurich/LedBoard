@@ -88,7 +88,7 @@ class BusStartupTests(unittest.TestCase):
         class StopStartup(Exception):
             pass
 
-        device = Mock()
+        device = Mock(spec=["display", "contrast"])
         serial = ModuleType("luma.core.interface.serial")
         serial.spi = Mock()
         serial.noop = Mock()
@@ -117,6 +117,28 @@ class BusStartupTests(unittest.TestCase):
         self.assertEqual((image.mode, image.size), ("1", (128, 8)))
         self.assertIsNotNone(image.crop((0, 0, 64, 8)).getbbox())
         self.assertIsNotNone(image.crop((64, 0, 128, 8)).getbbox())
+
+    def test_worker_loading_does_not_become_ready_before_fetching(self):
+        device = Mock(spec=["display", "display_loading", "contrast"])
+        serial = ModuleType("luma.core.interface.serial")
+        serial.spi, serial.noop = Mock(), Mock()
+        matrix = ModuleType("luma.led_matrix.device")
+        matrix.max7219 = Mock(return_value=device)
+        modules = {"luma.core.interface.serial": serial,
+                   "luma.led_matrix": ModuleType("luma.led_matrix"),
+                   "luma.led_matrix.device": matrix}
+
+        def fetch():
+            device.display_loading.assert_called_once()
+            device.display.assert_not_called()
+            return [("230:", "5m")]
+
+        with patch.dict(sys.modules, modules), patch.object(bus, "device", None), \
+                patch.object(bus, "get_departures", side_effect=fetch), \
+                patch.object(bus.time, "sleep", side_effect=KeyboardInterrupt):
+            bus.main()
+        device.display.assert_called_once()
+        self.assertEqual(device.display.call_args.args[0].size, (128, 8))
 
 
 if __name__ == "__main__":

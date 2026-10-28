@@ -31,6 +31,17 @@ def response_fixture():
 
 
 class WeatherTests(unittest.TestCase):
+    def test_readiness_waits_for_forecast_or_a_completed_error(self):
+        forecast = weather.parse_forecast(response_fixture(), CET)
+        for result in (forecast, OSError("offline")):
+            with self.subTest(result=result):
+                fetcher = Mock(side_effect=result) if isinstance(result, Exception) else Mock(return_value=result)
+                display = weather.Weather(fetcher, tz=CET, clock=lambda: NOW, start_worker=False)
+                self.assertFalse(display.ready)
+                with patch("builtins.print"):
+                    display.refresh()
+                self.assertTrue(display.ready)
+
     def test_truncated_response_is_retried_instead_of_ending_the_worker(self):
         forecast = weather.parse_forecast(response_fixture(), CET)
         display = weather.Weather(Mock(side_effect=[IncompleteRead(b"partial", 50), forecast]),
