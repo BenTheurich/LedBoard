@@ -91,6 +91,8 @@ sudo tailscale funnel status --json
 
 The `--bg` setting persists across Tailscale restarts and reboot. First use can require tailnet HTTPS/Funnel approval. To remove only this public listener, use `sudo tailscale funnel --bg --https=443 off`; avoid `reset`, which clears all Serve/Funnel configuration. HHG Wi-Fi settings and the application cron entry do not need to change.
 
+On 2026-10-28, code release `8700b333e74206bce5f433bef18b9dc4275dfe6a` was deployed and [public browser access](https://garching-board.tail8d1185.ts.net/) enabled. All 87 tests passed on both the desktop and Pi. Verification through a public relay confirmed anonymous requests receive 401, authenticated requests receive 200, the deployed JavaScript hash matches the release, and cross-origin submissions receive 403. Message and drawing submissions succeeded and Acid Rain was restored. The Tailscale service is enabled at boot and the Funnel mapping runs in background mode; this deployment did not reboot the Pi. The application backup is `/home/ben/.garching-board/backups/20261028-114118-8700b33/`.
+
 ## Hardware-free tests
 
 On the prepared Pi, the existing dependencies support:
