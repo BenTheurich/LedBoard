@@ -7,6 +7,7 @@ import time
 
 from PIL import Image
 
+from display_brightness import brightness_for_time
 from display_transition import FRAME_SECONDS, SWEEP_SECONDS, Transition
 from frame_transport import FIRST, decode_frames
 from matrix_output import create_matrix_output
@@ -44,7 +45,8 @@ class DisplayOwner:
         self._ticket = None
         self._transition = None
         self._last_image = Image.new("1", (128, 8))
-        self._contrast = self._next_contrast = 16
+        self._contrast = brightness_for_time()
+        self._brightness_check = 0.0
         self._deadline = self._next_tick = None
         self._first_tick = True
         self._thread = threading.Thread(target=self._run, name="board-display", daemon=True)
@@ -86,8 +88,8 @@ class DisplayOwner:
         if ticket.error:
             raise ticket.error
 
-    def show_frame(self, image, *, contrast=16):
-        self._call("show", image.copy(), contrast)
+    def show_frame(self, image):
+        self._call("show", image.copy())
 
     def close(self):
         if self._thread.is_alive():
@@ -110,7 +112,6 @@ class DisplayOwner:
                     self._next_tick = time.monotonic()
                     self._first_tick = True
                     self._deadline = None
-                    self._next_contrast = self._contrast
                     call.result = self._ticket
                 elif call.operation == "attach":
                     ticket, worker = call.args
@@ -138,14 +139,16 @@ class DisplayOwner:
             finally:
                 call.done.set()
 
-    def _display(self, image, contrast):
-        if image.mode != "1" or image.size != (128, 8):
-            raise ValueError("The display needs a monochrome 128x8 image")
-        if not isinstance(contrast, int) or not 0 <= contrast <= 255:
-            raise ValueError("Brightness must be between 0 and 255")
+    def _update_brightness(self):
+        contrast = brightness_for_time()
         if self._contrast != contrast:
             self._output.contrast(contrast)
             self._contrast = contrast
+        self._brightness_check = time.monotonic() + 1.0
+
+    def _display(self, image):
+        if image.mode != "1" or image.size != (128, 8):
+            raise ValueError("The display needs a monochrome 128x8 image")
         if self._last_image.tobytes() != image.tobytes():
             self._output.display(image)
             self._last_image = image.copy()
@@ -171,14 +174,15 @@ class DisplayOwner:
                 raise RuntimeError("The mode closed its frame channel")
             if data:
                 worker.buffer.extend(data)
-                for kind, contrast, image in decode_frames(worker.buffer):
+                # Keep accepting the existing packet format, but all modes use
+                # the owner's schedule instead of requesting their own level.
+                for kind, _contrast, image in decode_frames(worker.buffer):
                     if self._transition is not None:
                         if kind == FIRST:
                             self._transition.offer_frame(image)
-                            self._next_contrast = contrast
                             self._deadline = None
                     else:
-                        self._display(image, contrast)
+                        self._display(image)
             if worker.poll() is not None:
                 raise RuntimeError("The mode exited")
         except (OSError, TypeError, ValueError, RuntimeError) as error:
@@ -192,19 +196,18 @@ class DisplayOwner:
         if not self._first_tick:
             self._transition.advance()
         self._first_tick = False
-        # Brightness stays fixed throughout all passes. Restore the incoming
-        # mode's brightness only after its reveal completes.
-        self._display(self._transition.image(), self._contrast)
+        # Keep the entire wipe at one level, even across a schedule boundary.
+        self._display(self._transition.image())
         if self._transition.done:
             ticket = self._ticket
+            self._update_brightness()
             if ticket.error is None and self._worker is not None:
-                self._display(self._transition.image(), self._next_contrast)
                 try:
                     self._worker.send_resume()
                 except (OSError, RuntimeError) as error:
                     ticket.error = error
                     self._worker = None
-                    self._display(Image.new("1", (128, 8)), self._contrast)
+                    self._display(Image.new("1", (128, 8)))
             self._transition = self._ticket = self._next_tick = None
             ticket.done.set()
         else:
@@ -223,6 +226,8 @@ class DisplayOwner:
             self._output.display(self._last_image)
             self._started.set()
             while not self._stopping:
+                if self._transition is None and time.monotonic() >= self._brightness_check:
+                    self._update_brightness()
                 self._commands()
                 if self._stopping:
                     break
@@ -231,7 +236,8 @@ class DisplayOwner:
                 if self._transition is not None:
                     delay = min(0.005, max(0, self._next_tick - time.monotonic()))
                 else:
-                    delay = 0.005 if self._worker is not None else None
+                    # Static images and OFF also cross day/night boundaries.
+                    delay = 0.005 if self._worker is not None else 1.0
                 self._wake.wait(delay)
                 self._wake.clear()
         except Exception as error:

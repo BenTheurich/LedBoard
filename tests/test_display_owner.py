@@ -4,7 +4,7 @@ import sys
 import threading
 import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from PIL import Image
 
@@ -117,6 +117,9 @@ class DisplayOwnerTests(unittest.TestCase):
         self.workers = []
         self.producers = []
         self.threads = []
+        brightness = patch("display_owner.brightness_for_time", return_value=10)
+        self.brightness = brightness.start()
+        self.addCleanup(brightness.stop)
 
     def tearDown(self):
         for output in self.outputs:
@@ -179,7 +182,7 @@ class DisplayOwnerTests(unittest.TestCase):
         revealing = FrameGate(next(pixels for phase, step, pixels in expected if (phase, step) == (Phase.REVEAL, 30)))
         output.gates.extend((loading, revealing))
         owner, output = self.owner(output=output)
-        owner.show_frame(old, contrast=32)
+        owner.show_frame(old)
         worker, producer = self.channel()
         producer.contrast(96)
         ticket = owner.begin_switch()
@@ -199,20 +202,22 @@ class DisplayOwnerTests(unittest.TestCase):
         loading.release.set()
         self.assertTrue(revealing.entered.wait(3), "FIRST did not enter reveal at the next pass boundary")
         self.assertFalse(done.is_set(), "The producer resumed before its reveal finished")
+        self.brightness.return_value = 32
+        self.assertEqual([value for name, value, _ in output.snapshot() if name == "contrast"], [10])
         revealing.release.set()
         owner.wait(ticket)
         self.assertTrue(done.wait(2))
         self.assertEqual(errors, [])
-        self.assertTrue(output.wait_for(lambda events: ("contrast", 64) in [(name, value) for name, value, _ in events]))
+        self.assertTrue(output.wait_for(lambda events: ("display", normal.tobytes()) in [(name, value) for name, value, _ in events]))
         owner.close()
 
         events = output.snapshot()
         displayed = [value for name, value, _ in events if name == "display"]
         expected_pixels = changed_frames(old.tobytes(), [pixels for _, _, pixels in expected])
         self.assertEqual(displayed, [BLACK, old.tobytes(), *expected_pixels, normal.tobytes()])
-        self.assertEqual([value for name, value, _ in events if name == "contrast"], [16, 32, 96, 64])
+        self.assertEqual([value for name, value, _ in events if name == "contrast"], [10, 32])
         self.assertEqual([value for name, value, _ in resumed_snapshot if name == "display"][-1], target.tobytes())
-        self.assertEqual([value for name, value, _ in resumed_snapshot if name == "contrast"][-1], 96)
+        self.assertEqual([value for name, value, _ in resumed_snapshot if name == "contrast"][-1], 32)
         self.assertEqual(len({thread_id for _, _, thread_id in events}), 1)
         self.assertNotEqual(events[0][2], threading.get_ident())
         self.assertEqual([name for name, _, _ in events].count("factory"), 1)
@@ -222,7 +227,7 @@ class DisplayOwnerTests(unittest.TestCase):
     def test_off_finishes_the_erase_pass_and_leaves_black(self):
         old = pattern(29, 31)
         owner, output = self.owner()
-        owner.show_frame(old, contrast=40)
+        owner.show_frame(old)
         ticket = owner.begin_switch(off=True)
         owner.wait(ticket)
         displayed = [value for name, value, _ in output.snapshot() if name == "display"]
@@ -230,6 +235,18 @@ class DisplayOwnerTests(unittest.TestCase):
         self.assertEqual(displayed, [BLACK, old.tobytes(), *changed_frames(old.tobytes(), [pixels for _, _, pixels in expected])])
         self.assertEqual(displayed[-1], BLACK)
         self.assertIsNone(ticket.error)
+
+    def test_static_frame_follows_schedule_without_a_worker_or_pixel_redraw(self):
+        owner, output = self.owner()
+        owner.show_frame(pattern(29, 31))
+        before = [value for name, value, _ in output.snapshot() if name == "display"]
+        self.brightness.return_value = 32
+        self.assertTrue(output.wait_for(lambda events: ("contrast", 32) in [(name, value) for name, value, _ in events]))
+        owner.close()
+        events = output.snapshot()
+        self.assertEqual([value for name, value, _ in events if name == "contrast"], [10, 32])
+        self.assertEqual([value for name, value, _ in events if name == "display"], before)
+        self.assertEqual(len({thread_id for _, _, thread_id in events}), 1)
 
     def test_cancel_finishes_black_and_worker_close_releases_pending_first(self):
         owner, output = self.owner()

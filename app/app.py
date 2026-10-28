@@ -64,7 +64,7 @@ def show_ip_on_matrix(ip_addr):
     pacer = FramePacer(12)
     for _ in range(2):
         for x in range(w + 128 - 64):
-            display.show_frame(map_serpentine(img.crop((x, 0, x + 64, 16))), contrast=32)
+            display.show_frame(map_serpentine(img.crop((x, 0, x + 64, 16))))
             pacer.wait()
 
 # --- FLASK ROUTES ---

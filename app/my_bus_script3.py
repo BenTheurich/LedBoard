@@ -1,21 +1,15 @@
 import time
 import threading
-from datetime import datetime
 from luma.core.legacy import text, textsize
 from luma.core.legacy.font import proportional, CP437_FONT
 from PIL import Image, ImageDraw
+from display_brightness import BRIGHTNESS_DAY, BRIGHTNESS_NIGHT, brightness_for_time
 from display_utils import FramePacer, map_serpentine
 
 # --- CONFIGURATION ---
 SEARCH_NAME = "Garching, Untere Straßäcker"
 TARGET_DEST = "Forschungszentrum"
 TARGET_LINES = ["230", "292", "X205"]
-
-# --- BRIGHTNESS SETTINGS ---
-BRIGHTNESS_DAY = 32   
-BRIGHTNESS_NIGHT = 10 
-HOUR_DAY_START = 7    
-HOUR_NIGHT_START = 20 
 
 # --- ANIMATION SETTINGS ---
 SCROLL_SPEED = 0.05    # One pixel every 50 ms, including rendering time
@@ -35,11 +29,7 @@ found_station_id = None
 # --- HELPER FUNCTIONS ---
 
 def check_brightness():
-    now = datetime.now()
-    if HOUR_DAY_START <= now.hour < HOUR_NIGHT_START:
-        device.contrast(BRIGHTNESS_DAY)
-    else:
-        device.contrast(BRIGHTNESS_NIGHT)
+    device.contrast(brightness_for_time())
 
 def get_departures():
     from mvg import MvgApi
@@ -225,7 +215,7 @@ def main():
 
     device = max7219(spi(port=0, device=0, gpio=noop()), cascaded=16,
                      block_orientation=-90, rotate=0)
-    device.contrast(BRIGHTNESS_DAY)
+    check_brightness()
     print(f"Starting 2-Row Bus Scroll... Day: {BRIGHTNESS_DAY} / Night: {BRIGHTNESS_NIGHT}", flush=True)
     # Standalone hardware shows loading; workers remain unready until fetching ends.
     loading, _ = create_tall_scroll_image(["BUS", "LOADING"])
