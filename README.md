@@ -1,93 +1,75 @@
-# garching-board
+# LedBoard
 
-A wall-mounted transit departure display for Garching, built with a Raspberry Pi Zero WH and MAX7219 LED matrices.
+A 64×16 LED display I built for my desk using a Raspberry Pi Zero WH and MAX7219 matrices. It shows the time, live bus departures, weather, and pixel animations. A Flask web controller lets me switch modes, send messages, and draw on the display from a phone or laptop.
 
-## Project status
+[Watch the demo video](https://photos.app.goo.gl/hk6Wh3szRpFf2oQn9)
 
-The board is assembled and running. Its Flask controller, display programs, and HTML template were imported from the Pi on 2026-10-25, with source-file hashes checked during transfer. The current code adds serialized program switching, faster pixel mapping, paced animation frames, and a fixed-width clock that redraws only when the displayed second changes. The visualizer interpolates slower animation updates between frames. The original import remains recorded in [pi-app-snapshot.json](docs/pi-app-snapshot.json) and Git commit `88a40b9`.
+![LedBoard showing a clock, with the Raspberry Pi and wiring visible on the desk](docs/images/ledboard.webp)
 
-Open the [controller](http://garching-board.local:5000/) on the local network. If local hostname discovery is unavailable, the controller is also reachable at `http://100.111.233.84:5000/` while connected to the same Tailscale network. It starts through the existing cron `@reboot` entry.
+## Display modes
 
-For browser-only access, open the [password-protected controller](https://garching-board.tail8d1185.ts.net/). Visitors enter the shared password; no username, Tailscale installation, or account is needed. Tailscale Funnel forwards HTTPS requests to the controller's authenticated loopback listener. Keep the shared password private.
+| Mode | What it shows |
+| --- | --- |
+| Clock | Hours, minutes, and seconds in large, fixed-width digits |
+| Bus timetable | Scrolling MVG departures, with pauses to read each pair |
+| Weather | Forecasts from Open-Meteo, including current conditions, temperatures, and rain |
+| Messages | Up to two lines of text, with scrolling for longer messages |
+| Pixel drawing | A 64×16 canvas with drawing, erasing, undo, and touch controls |
+| Visualizers | Game of Life, Pong, Falling Sand, Drawing Harmonograph, Acid Rain, and simulated spectrum bars |
 
-Wi-Fi prefers HHG and falls back to the phone hotspot. HHG access, hotspot fallback, and reconnection after reboot passed during the network setup session. See [Pi setup](docs/pi-setup.md) and [application dependencies and startup](docs/application.md).
+The controller also has an OFF button. Modes are selected manually. Message and drawing drafts stay in the current browser tab. The Music Visualizer generates simulated spectrum bars; it does not capture audio.
 
-## Hardware and intended display
+Bus departures are configured for **Garching, Untere Straßäcker**, serving lines **230**, **292**, and **X205** toward **Forschungszentrum**. The stop and route filters are in [my_bus_script3.py](app/my_bus_script3.py); weather settings are in [weather.py](app/weather.py).
 
-- Original Raspberry Pi Zero WH, ARMv6, with a pre-soldered GPIO header. This is the original Zero W generation, not the Zero 2 W.
-- 32 GB SanDisk microSD card running Raspberry Pi OS.
-- 5 V / 3 A micro-USB power supply.
-- Four Hailege MAX7219 4-in-1 boards: sixteen 8×8 matrices, intended to form a 64×16 display.
-- Dupont jumper cables.
+## Hardware
 
-The installed programs use SPI bus 0, device 0, with `cascaded=16`, `block_orientation=-90`, and `rotate=0`. They map a logical 64×16 image to the physical 128×8 chain, reversing both axes for the lower row.
+- Original Raspberry Pi Zero WH with a pre-soldered GPIO header, running Raspberry Pi OS on ARMv6.
+- Four MAX7219 4-in-1 boards: sixteen 8×8 LED matrices arranged as a 64×16 display.
+- A microSD card, a 5 V / 3 A supply, and jumper wires for SPI.
 
-## Existing programs
+The matrices form a 128×8 chain folded into two rows. Shared rendering helpers map the logical 64×16 image onto that chain, rotating the lower row to match the wiring.
 
-| Controller button | Source | Behavior |
-| --- | --- | --- |
-| Clock | [clock.py](app/clock.py) | Stretched hours, minutes, and seconds in fixed-width digit cells |
-| Game of Life | [game_of_life.py](app/game_of_life.py) | Cellular automaton |
-| Bus Timetable | [my_bus_script3.py](app/my_bus_script3.py) | Two-row scrolling departures with day/night brightness |
-| Weather | [weather.py](app/weather.py) | Four daily Celsius forecast points, plus labeled current conditions, high/low, and hourly rain screens |
-| Message Board | [message.py](app/message.py) | Send up to two lines from the controller; long rows scroll horizontally |
-| Pixel Drawing | [drawing.py](app/drawing.py) | Draw on the 64×16 grid using touch or a mouse, then send the image |
-| Pong | [pong_explode2.py](app/pong_explode2.py) | Animated Pong with particle effects |
-| Music Visualizer | [visualizations.py](app/visualizations.py) | Simulated spectrum bars; no audio input |
-| Falling Sand | [falling_sand.py](app/falling_sand.py) | Three random drop areas fill the screen; pouring pauses while a central opening widens to drain it |
-| Drawing Harmonograph | [harmonograph.py](app/harmonograph.py) | Looping trace with a gradually dotted tail |
-| Acid Rain | [acid_rain.py](app/acid_rain.py) | Falling pixel trails that pass through the bottom |
-| TURN OFF | [clear_screen.py](app/clear_screen.py) | Clears the matrix |
+## Rendering and mode changes
 
-The bus program queries MVG through the Python `mvg` package for **Garching, Untere Straßäcker**, filtering lines **230**, **292**, and **X205** toward **Forschungszentrum**. It displays X205 as `205`. U6 departures at Garching-Forschungszentrum were part of the original goal and are not implemented in this selected program.
+One persistent display thread owns the SPI connection. Each mode runs in a separate process and sends monochrome frames through pipes. During a mode change, a sweeping bar erases the outgoing image, keeps moving while the next mode prepares, and then reveals its first frame. Selecting OFF erases the display to black.
 
-The controller groups Clock, Bus Timetable, and Weather under **Everyday**, gives messages and pixel drawings their own editors, and groups animations under **Visualizers**. Sending text or a drawing selects that mode immediately and keeps the draft available for editing. Modes stay selected until changed through the controller; no automatic mode switching is configured. These changes require deploying the source files before they appear on the Pi.
+All modes share a day/night brightness schedule based on the Pi's local time. The browser shows switching progress and disables submissions until the transition finishes. The implementation is split across [display_owner.py](app/display_owner.py), [display_transition.py](app/display_transition.py), and [frame_transport.py](app/frame_transport.py).
 
-Weather uses [Open-Meteo](https://open-meteo.com/) without an API key. See [weather and messages](docs/application.md#weather-and-messages) for display pages, refresh behavior, and coordinates.
+## Run on a Raspberry Pi
 
-For access from other residents' devices, see [sharing access](docs/application.md#sharing-access). The `100.111.233.84` address requires Tailscale; connecting to HHG Wi-Fi alone does not provide access to that address.
+This project assumes an SPI-enabled Pi with the required Python and native GPIO/SPI dependencies already configured. [requirements.txt](requirements.txt) records the direct dependency versions from the working board; the environment and hardware requirements are covered in the [application notes](docs/application.md#observed-runtime).
 
-## Run a network check from Windows
+On a prepared Pi:
 
-The local checkout has an ignored `.local/access.ps1` that points to the existing SSH key and pinned host-key file. No keys or credentials are tracked by Git.
-
-```powershell
-. .\.local\access.ps1
-& .\scripts\Invoke-Pi.ps1 -ScriptPath .\scripts\pi\check-network.sh -Root
+```bash
+git clone https://github.com/BenTheurich/LedBoard.git
+cd LedBoard/app
+python3 app.py
 ```
 
-This check reads connection state, service status, DHCP routing, DNS, and HTTPS availability. It does not change Wi-Fi or reboot the Pi. It requires the laptop to be connected to the same Tailscale network.
+Run from `app/` because the controller launches its workers using relative paths. Open `http://<pi-address>:5000` to use the controller. Startup scrolls the Pi's IP address and leaves the selected mode set to OFF.
 
-For another checkout, set these variables to your own authorized key and independently verified known-hosts file:
+Port 5000 has no authentication and is intended for a trusted local network. Optional password-protected browser access through Tailscale Funnel is described in [sharing access](docs/application.md#sharing-access).
 
-```powershell
-$env:GARCHING_BOARD_SSH_KEY = 'C:\path\to\your\id_ed25519'
-$env:GARCHING_BOARD_KNOWN_HOSTS = 'C:\path\to\your\pi-known-hosts'
-```
-
-The helper uses SSH user `ben`, address `100.111.233.84`, and host-key alias `garching-board.local` by default. `-PiAddress`, `-SshUser`, `-IdentityFile`, and `-KnownHostsFile` override those defaults. `-Root` runs the supplied script with `sudo -n`; use it only for a script you have reviewed.
-
-## Repository contents
-
-- `app/`: the controller, nine display programs, shared rendering/timing helpers, and `templates/index.html`.
-- `requirements.txt`: observed versions of the application's direct Python dependencies; native Pi dependencies are documented separately.
-- `docs/application.md`: runtime versions, working-directory requirements, and the existing cron startup.
-- `docs/pi-app-snapshot.json`: import timestamp, source paths, and SHA-256 hashes for the eight imported files.
-- `scripts/Invoke-Pi.ps1`: SSH helper adapted from the Wi-Fi setup session, with configurable local key paths and strict host-key checking.
-- `scripts/pi/check-network.sh`: read-only check adapted from the final persistent Wi-Fi verification script.
-- `setup/network/`: credential-free reference files for the installed Wi-Fi stack. These are not an automatic installer.
-- `docs/pi-setup.md`: device details, setup decisions, verification results, and recovery locations.
+The existing board starts through a cron `@reboot` entry. Pushing to GitHub does not deploy the application. See [startup](docs/application.md#existing-automatic-startup) and [deployment and recovery](docs/application.md#deployment-and-recovery) for the device's current layout and update procedure.
 
 ## Tests
 
+The tests exercise rendering, frame transport, switching, the controller, and display modes without a physical matrix. From the repository root, with a Python virtual environment activated:
+
 ```bash
-python -m unittest discover -s tests -v
+python -m pip install Flask==3.1.1 Pillow==11.1.0 tzdata
+python -m pip install --no-deps luma.core==2.4.2
+python -B -m unittest discover -s tests -v
 ```
 
-The tests require Flask, Pillow, and luma.core, and run without initializing GPIO or SPI. They verify concurrent switching, child cleanup, pixel mapping, frame pacing, clock redraws, repeated sand cycles, and bounded visualization state. See [application documentation](docs/application.md) for a desktop test environment and deployment notes.
+This installs the dependencies for desktop tests. The Pi additionally needs its hardware drivers. See the [test notes](docs/application.md#hardware-free-tests) for more detail.
 
-## Possible next work
+## Further documentation
 
-The hardware setup, pixel mapping, bus fetching, rendering, and controller startup already exist. Further work can focus on optional U6 departures and clearer handling of transit-data failures. Moving startup from cron to systemd would be an optional operational change.
+- [Application notes](docs/application.md): rendering, mode behavior, dependencies, startup, deployment, and recovery.
+- [Pi setup record](docs/pi-setup.md): the existing device and network configuration.
+- [Network reference files](setup/network/README.md): configuration examples with credentials omitted.
+- [Original source snapshot](docs/pi-app-snapshot.json): hashes of the files first imported from the Pi.
 
-The older Mbed `EmbeddedSnakeGame` project found on this PC is separate; its firmware has not been imported here.
+The Pi setup record describes my existing installation. Its hostname and private configuration paths still use `garching-board`.
