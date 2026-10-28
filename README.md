@@ -8,7 +8,7 @@ The board is assembled and running. Its Flask controller, display programs, and 
 
 Open the [controller](http://garching-board.local:5000/) on the local network. If local hostname discovery is unavailable, the controller is also reachable at `http://100.111.233.84:5000/` while connected to the same Tailscale network. It starts through the existing cron `@reboot` entry.
 
-For browser-only access, open the [password-protected controller](https://garching-board.tail8d1185.ts.net/). Visitors enter the shared username and password; they do not need Tailscale installed or an account. Tailscale Funnel forwards HTTPS requests to the controller's authenticated loopback listener. Keep the shared login details private.
+For browser-only access, open the [password-protected controller](https://garching-board.tail8d1185.ts.net/). Visitors enter the shared password; no username, Tailscale installation, or account is needed. Tailscale Funnel forwards HTTPS requests to the controller's authenticated loopback listener. Keep the shared password private.
 
 Wi-Fi prefers HHG and falls back to the phone hotspot. HHG access, hotspot fallback, and reconnection after reboot passed during the network setup session. See [Pi setup](docs/pi-setup.md) and [application dependencies and startup](docs/application.md).
 
