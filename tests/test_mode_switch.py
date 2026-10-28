@@ -15,7 +15,7 @@ class FakeClock:
         self.now = 0.0
 
     def tick(self):
-        self.now += 0.04
+        self.now += 1 / mode_switch.TRANSITION_FPS
 
 
 class TransitionTests(unittest.TestCase):
@@ -56,13 +56,23 @@ class TransitionTests(unittest.TestCase):
         self.assertGreaterEqual(clock.now, mode_switch.SWEEP_SECONDS)
         self.assertLess(clock.now, mode_switch.SWEEP_SECONDS + 0.08)
         self.assertGreater(device.display.call_count, 1)
+        methods = [entry[0] for entry in device.mock_calls]
+        self.assertLess(methods.index("show"), methods.index("display"))
+        device.show.assert_called_once_with()
         for arguments in device.display.call_args_list:
             image = arguments.args[0]
             self.assertEqual((image.mode, image.size), ("1", (128, 8)))
         device.clear.assert_called_once_with()
-        pacer.assert_called_once_with(40)
+        pacer.assert_called_once_with(mode_switch.TRANSITION_FPS)
 
-    def test_off_animation_has_a_minimum_duration_without_a_ready_callback(self):
+    def test_off_clear_does_not_restart_a_white_reset_sweep(self):
+        device = Mock()
+        with patch.object(mode_switch, "get_matrix_device", return_value=device):
+            mode_switch.clear_display()
+        device.clear.assert_called_once_with()
+        device.display.assert_not_called()
+
+    def test_reset_sweep_respects_its_minimum_duration_without_a_ready_callback(self):
         clock = FakeClock()
         device = Mock()
         with patch.object(mode_switch, "get_matrix_device", return_value=device), \

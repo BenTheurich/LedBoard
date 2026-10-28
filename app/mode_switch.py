@@ -9,10 +9,7 @@ import time
 
 from PIL import Image, ImageDraw
 
-from display_utils import FramePacer, map_serpentine
-
-SWEEP_SECONDS = 0.45
-TRANSITION_FPS = 40
+from display_utils import FramePacer, SWEEP_SECONDS, TRANSITION_FPS, map_serpentine
 
 
 class ModeStartError(RuntimeError):
@@ -47,6 +44,7 @@ def render_reset(elapsed):
 def animate_reset(ready=None, duration=SWEEP_SECONDS, timeout=15):
     """Finish a sweep after readiness; never hand SPI to an unprepared child."""
     device = get_matrix_device()
+    device.show()
     device.contrast(16)
     started = time.monotonic()
     pacer = FramePacer(TRANSITION_FPS)
@@ -72,8 +70,14 @@ def stop_process(process, timeout=2):
     try:
         process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
+        print("Mode stop timed out; killing the child", flush=True)
         process.kill()
         process.wait()
+
+
+def clear_display():
+    """OFF finishes black after the outgoing child has wiped its own frame."""
+    get_matrix_device().clear()
 
 
 @contextmanager

@@ -4,6 +4,9 @@ import time
 
 from PIL import Image
 
+SWEEP_SECONDS = 0.45
+TRANSITION_FPS = 40
+
 
 def map_serpentine(image):
     """Map a logical 64x16 image onto the physical 128x8 matrix chain."""

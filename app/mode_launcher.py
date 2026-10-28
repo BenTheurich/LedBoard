@@ -7,6 +7,8 @@ from pathlib import Path
 import runpy
 import sys
 
+from display_handoff import install_handoff
+
 
 def prepare_mode(filename):
     # Importing these libraries does not open SPI. Mode modules must likewise
@@ -33,6 +35,7 @@ def main(argv=None):
         if go.read(1) != b"G":
             return 1
     sys.argv = [filename, *extra_args]
+    install_handoff()
     runpy.run_path(filename, run_name="__main__")
     return 0
 

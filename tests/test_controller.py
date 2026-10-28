@@ -94,7 +94,7 @@ class ControllerTests(unittest.TestCase):
             except BaseException as error:
                 failures.append(error)
 
-        with patch.object(controller, "animate_reset") as clear_mock, \
+        with patch.object(controller, "clear_display") as clear_mock, \
                 patch.object(controller, "launch_mode", side_effect=spawn) as launch_mock:
             first = threading.Thread(target=post, args=("Clock",))
             second = threading.Thread(target=post, args=("Pong",))
@@ -126,7 +126,7 @@ class ControllerTests(unittest.TestCase):
         process = Mock()
         controller.current_process = process
         controller.active_script_name = "Clock"
-        with patch.object(controller, "animate_reset") as clear, \
+        with patch.object(controller, "clear_display") as clear, \
                 patch.object(controller, "launch_mode") as spawn:
             response = controller.app.test_client().post("/run", data={"script_name": "OFF"})
 
@@ -138,17 +138,17 @@ class ControllerTests(unittest.TestCase):
         self.assertIsNone(controller.current_process)
         self.assertEqual(controller.active_script_name, "OFF")
 
-    def test_old_child_is_reaped_before_the_off_animation_writes(self):
+    def test_old_child_is_reaped_before_the_final_off_clear(self):
         events = []
         process = Mock()
         process.terminate.side_effect = lambda: events.append("terminate")
         process.wait.side_effect = lambda timeout=None: events.append("reaped")
         controller.current_process = process
-        with patch.object(controller, "animate_reset", side_effect=lambda: events.append("animate")), \
+        with patch.object(controller, "clear_display", side_effect=lambda: events.append("clear")), \
                 patch.object(controller, "launch_mode") as launch:
             response = controller.app.test_client().post("/run", data={"script_name": "OFF"})
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(events, ["terminate", "reaped", "animate"])
+        self.assertEqual(events, ["terminate", "reaped", "clear"])
         launch.assert_not_called()
 
     def test_failed_start_reports_an_error_and_keeps_selection_off(self):
@@ -169,7 +169,7 @@ class ControllerTests(unittest.TestCase):
         process = Mock()
         process.wait.side_effect = [subprocess.TimeoutExpired("old-child", 2), 0]
         controller.current_process = process
-        with patch.object(controller, "animate_reset"), \
+        with patch.object(controller, "clear_display"), \
                 patch.object(controller, "launch_mode"):
             response = controller.app.test_client().post("/run", data={"script_name": "OFF"})
 
@@ -181,7 +181,7 @@ class ControllerTests(unittest.TestCase):
         process = Mock()
         controller.current_process = process
         controller.active_script_name = "Clock"
-        with patch.object(controller, "animate_reset") as clear, \
+        with patch.object(controller, "clear_display") as clear, \
                 patch.object(controller, "launch_mode") as spawn:
             response = controller.app.test_client().post("/run", data={"script_name": "Unknown"})
 
@@ -194,7 +194,7 @@ class ControllerTests(unittest.TestCase):
 
     def test_selected_visuals_are_available_on_the_main_panel(self):
         expected = {"Falling Sand": "falling_sand.py", "Drawing Harmonograph": "harmonograph.py", "Acid Rain": "acid_rain.py"}
-        with patch.object(controller, "animate_reset"), patch.object(controller, "launch_mode") as spawn:
+        with patch.object(controller, "clear_display"), patch.object(controller, "launch_mode") as spawn:
             client = controller.app.test_client()
             for name, script in expected.items():
                 with self.subTest(mode=name):
@@ -213,7 +213,7 @@ class ControllerTests(unittest.TestCase):
             created.append(process)
             return process
 
-        with patch.object(controller, "animate_reset"), \
+        with patch.object(controller, "clear_display"), \
                 patch.object(controller, "launch_mode", side_effect=spawn):
             client = controller.app.test_client()
             self.assertEqual(client.post("/run", data={"script_name": "Weather"}).status_code, 302)
@@ -268,7 +268,7 @@ class ControllerTests(unittest.TestCase):
 
     def test_success_keeps_original_message_text_in_the_form(self):
         value = ' Grüße!\r\nCafé “12°” '
-        with patch.object(controller, "animate_reset"), patch.object(controller, "launch_mode") as spawn:
+        with patch.object(controller, "clear_display"), patch.object(controller, "launch_mode") as spawn:
             response = controller.app.test_client().post("/message", data={"message": value})
         self.assertEqual(response.status_code, 200)
         self.assert_message_field(response.get_data(as_text=True), value)
@@ -277,7 +277,7 @@ class ControllerTests(unittest.TestCase):
     def test_json_submissions_report_the_selected_mode(self):
         client = controller.app.test_client()
         headers = {"Accept": "application/json"}
-        with patch.object(controller, "animate_reset"), patch.object(controller, "launch_mode"):
+        with patch.object(controller, "clear_display"), patch.object(controller, "launch_mode"):
             for path, data, expected in (
                 ("/run", {"script_name": "Clock"}, "Clock"),
                 ("/message", {"message": "♥ Grüße"}, "Message Board"),
@@ -289,7 +289,7 @@ class ControllerTests(unittest.TestCase):
                     self.assertEqual(response.get_json(), {"active_script": expected})
 
     def test_drawing_button_opens_editor_without_starting_a_child(self):
-        with patch.object(controller, "animate_reset") as clear, \
+        with patch.object(controller, "clear_display") as clear, \
                 patch.object(controller, "launch_mode") as spawn:
             response = controller.app.test_client().post("/run", data={"script_name": "Pixel Drawing"})
         self.assertEqual(response.status_code, 302)
@@ -302,7 +302,7 @@ class ControllerTests(unittest.TestCase):
         controller.current_process = process
         controller.active_script_name = "Clock"
         client = controller.app.test_client()
-        with patch.object(controller, "animate_reset") as clear, \
+        with patch.object(controller, "clear_display") as clear, \
                 patch.object(controller, "launch_mode") as spawn:
             for data in ({}, {"pixels": "0" * 1023}, {"pixels": "0" * 1025},
                          {"pixels": "0" * 1023 + ";"}):
@@ -319,7 +319,7 @@ class ControllerTests(unittest.TestCase):
         process = Mock()
         controller.current_process = process
         controller.active_script_name = "Weather"
-        with patch.object(controller, "animate_reset") as clear, \
+        with patch.object(controller, "clear_display") as clear, \
                 patch.object(controller, "launch_mode") as spawn:
             for value in (" ", "one\ntwo\nthree", "a" * 281, "hello \U0001f600", "\x00bad"):
                 with self.subTest(value=value):
@@ -336,7 +336,7 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(controller.active_script_name, "Weather")
 
     def test_invalid_json_message_returns_an_error_without_switching(self):
-        with patch.object(controller, "animate_reset") as clear, \
+        with patch.object(controller, "clear_display") as clear, \
                 patch.object(controller, "launch_mode") as spawn:
             response = controller.app.test_client().post(
                 "/message", data={"message": "hello 😀"}, headers={"Accept": "application/json"})
@@ -346,7 +346,7 @@ class ControllerTests(unittest.TestCase):
         spawn.assert_not_called()
 
     def test_oversized_request_does_not_switch_display(self):
-        with patch.object(controller, "animate_reset") as clear:
+        with patch.object(controller, "clear_display") as clear:
             response = controller.app.test_client().post("/message", data={"message": "a" * 5000})
         self.assertEqual(response.status_code, 413)
         self.assertIn(b"Use a shorter message", response.data)

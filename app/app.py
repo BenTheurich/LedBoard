@@ -3,7 +3,7 @@ import threading
 from flask import Flask, jsonify, render_template, request, redirect
 from message import MAX_MESSAGE_LENGTH, validate_message
 from drawing import WIDTH, HEIGHT, validate_pixels
-from mode_switch import ModeStartError, animate_reset, get_matrix_device, launch_mode, stop_process
+from mode_switch import ModeStartError, clear_display, get_matrix_device, launch_mode, stop_process
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 4096
@@ -100,7 +100,7 @@ def switch_program(script_name, extra_args=()):
     active_script_name = "OFF"
     if script_name == "OFF":
         try:
-            animate_reset()
+            clear_display()
         except Exception as error:
             raise ModeStartError("Could not clear the board. Try again.") from error
     else:
