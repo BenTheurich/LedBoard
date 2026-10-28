@@ -15,7 +15,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 import display_handoff
-from display_utils import map_serpentine
+from display_utils import map_serpentine, render_sweep, sweep_position
 
 
 class FakeClock:
@@ -27,32 +27,38 @@ class FakeClock:
 
 
 class WipeTests(unittest.TestCase):
-    def test_wipe_erases_or_reveals_the_same_logical_columns_in_both_rows(self):
+    def test_content_outside_the_bar_uses_the_same_logical_columns_in_both_rows(self):
         logical = Image.new("1", (64, 16), 1)
         original = map_serpentine(logical)
         erased = display_handoff.wipe_frame(original, 0.5)
         revealed = display_handoff.wipe_frame(original, 0.5, reveal=True)
         for y in range(16):
             for x in range(64):
+                if 31 <= x <= 35:
+                    continue
                 physical = (x, y) if y < 8 else (127 - x, 15 - y)
                 self.assertEqual(bool(erased.getpixel(physical)), x >= 32)
                 self.assertEqual(bool(revealed.getpixel(physical)), x < 32)
 
-    def test_wipes_preserve_only_target_pixels_and_have_exact_endpoints(self):
+    def test_wipes_use_the_loading_bar_preserve_content_and_have_exact_endpoints(self):
         logical = Image.new("1", (64, 16), 0)
         for point in ((0, 0), (63, 0), (0, 15), (63, 15), (20, 8), (42, 7)):
             logical.putpixel(point, 1)
         original = map_serpentine(logical)
-        original_pixels = set(index for index, on in enumerate(original.getdata()) if on)
         for reveal in (False, True):
-            previous = set() if reveal else original_pixels
             for progress in (0, .1, .3, .5, .8, 1):
                 frame = display_handoff.wipe_frame(original, progress, reveal=reveal)
-                pixels = set(index for index, on in enumerate(frame.getdata()) if on)
-                self.assertLessEqual(pixels, original_pixels)
-                self.assertLessEqual(previous, pixels) if reveal else self.assertLessEqual(pixels, previous)
-                previous = pixels
-            self.assertEqual(previous, original_pixels if reveal else set())
+                bar = render_sweep(progress)
+                boundary = max(0, min(64, sweep_position(progress)))
+                for y in range(16):
+                    for x in range(64):
+                        physical = (x, y) if y < 8 else (127 - x, 15 - y)
+                        content_visible = x < boundary if reveal else x >= boundary
+                        expected = bool(bar.getpixel((x, y))) or (content_visible and bool(logical.getpixel((x, y))))
+                        self.assertEqual(bool(frame.getpixel(physical)), expected)
+                empty = Image.new("1", (128, 8), 0)
+                self.assertEqual(display_handoff.wipe_frame(empty, progress, reveal=reveal).tobytes(),
+                                 map_serpentine(bar).tobytes())
         self.assertEqual(display_handoff.wipe_frame(original, 0).tobytes(), original.tobytes())
         self.assertIsNone(display_handoff.wipe_frame(original, 0, reveal=True).getbbox())
         self.assertIsNone(display_handoff.wipe_frame(original, 1).getbbox())
@@ -278,7 +284,7 @@ class AtomicFrameTests(unittest.TestCase):
             process.stdin.flush()
             output, errors = process.communicate(timeout=8)
             self.assertEqual(process.returncode, 0, errors.decode(errors="replace"))
-            self.assertLess(time.monotonic() - started, 3)
+            self.assertLess(time.monotonic() - started, 4)
             report = json.loads(output)
             self.assertTrue(report["deferred"])
             self.assertEqual((report["reveal"][0], report["reveal"][-1]), (0, 1024))

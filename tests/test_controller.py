@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import Mock, call, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
+from display_utils import STOP_TIMEOUT
 
 spec = importlib.util.spec_from_file_location(
     "garching_controller", Path(__file__).resolve().parents[1] / "app" / "app.py"
@@ -132,7 +133,7 @@ class ControllerTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 302)
         process.terminate.assert_called_once_with()
-        process.wait.assert_called_once_with(timeout=2)
+        process.wait.assert_called_once_with(timeout=STOP_TIMEOUT)
         clear.assert_called_once_with()
         spawn.assert_not_called()
         self.assertIsNone(controller.current_process)
@@ -167,14 +168,14 @@ class ControllerTests(unittest.TestCase):
 
     def test_timeout_kills_and_reaps_child_before_switching(self):
         process = Mock()
-        process.wait.side_effect = [subprocess.TimeoutExpired("old-child", 2), 0]
+        process.wait.side_effect = [subprocess.TimeoutExpired("old-child", STOP_TIMEOUT), 0]
         controller.current_process = process
         with patch.object(controller, "clear_display"), \
                 patch.object(controller, "launch_mode"):
             response = controller.app.test_client().post("/run", data={"script_name": "OFF"})
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(process.method_calls, [call.terminate(), call.wait(timeout=2), call.kill(), call.wait()])
+        self.assertEqual(process.method_calls, [call.terminate(), call.wait(timeout=STOP_TIMEOUT), call.kill(), call.wait()])
         self.assertIsNone(controller.current_process)
 
     def test_unknown_program_leaves_current_program_untouched(self):

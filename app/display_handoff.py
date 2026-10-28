@@ -4,29 +4,29 @@ from contextlib import contextmanager
 import signal
 import time
 
-from PIL import Image
+from PIL import Image, ImageChops
 
-from display_utils import FramePacer, SWEEP_SECONDS, TRANSITION_FPS
+from display_utils import FramePacer, SWEEP_SECONDS, TRANSITION_FPS, map_serpentine, render_sweep, sweep_position
 
 
 def wipe_frame(image, progress, reveal=False):
     """Apply a logical left-to-right wipe to the folded physical matrix image."""
     if image.mode != "1" or image.size != (128, 8):
         raise ValueError("Handoff needs a monochrome 128x8 physical frame")
-    boundary = round(max(0.0, min(1.0, progress)) * 64)
+    boundary = max(0, min(64, sweep_position(progress)))
     frame = Image.new("1", image.size, 0) if reveal else image.copy()
     if boundary:
         # The lower logical row occupies the reversed right half of the chain.
         for box in ((0, 0, boundary, 8), (128 - boundary, 0, 128, 8)):
             frame.paste(image.crop(box) if reveal else 0, box)
-    return frame
+    return ImageChops.logical_or(frame, map_serpentine(render_sweep(progress)))
 
 
 @contextmanager
 def _atomic_frame():
     # On the Pi, defer TERM until the SPI write and its snapshot agree. The
     # first reveal can defer it for one sweep; erase plus reveal stay under the
-    # controller's two-second graceful-stop deadline.
+    # controller's four-second graceful-stop deadline.
     mask = getattr(signal, "pthread_sigmask", None)
     previous = mask(signal.SIG_BLOCK, {signal.SIGTERM}) if mask else None
     try:

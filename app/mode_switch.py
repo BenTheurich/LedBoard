@@ -7,9 +7,7 @@ import os
 import subprocess
 import time
 
-from PIL import Image, ImageDraw
-
-from display_utils import FramePacer, SWEEP_SECONDS, TRANSITION_FPS, map_serpentine
+from display_utils import FramePacer, STOP_TIMEOUT, SWEEP_SECONDS, TRANSITION_FPS, map_serpentine, render_sweep
 
 
 class ModeStartError(RuntimeError):
@@ -29,19 +27,10 @@ def get_matrix_device():
 
 def render_reset(elapsed):
     """A narrow reset sweep with dithered edges, without a full-panel flash."""
-    image = Image.new("1", (64, 16), 0)
-    draw = ImageDraw.Draw(image)
-    x = math.floor((elapsed % SWEEP_SECONDS) / SWEEP_SECONDS * 72) - 4
-    draw.rectangle((x, 0, x + 2, 15), fill=1)
-    for y in range(16):
-        if 0 <= x - 1 < 64 and y % 2 == 0:
-            draw.point((x - 1, y), fill=1)
-        if 0 <= x + 3 < 64 and y % 2:
-            draw.point((x + 3, y), fill=1)
-    return image
+    return render_sweep((elapsed % SWEEP_SECONDS) / SWEEP_SECONDS)
 
 
-def animate_reset(ready=None, duration=SWEEP_SECONDS, timeout=15):
+def animate_reset(ready=None, duration=SWEEP_SECONDS, timeout=12):
     """Finish a sweep after readiness; never hand SPI to an unprepared child."""
     device = get_matrix_device()
     device.show()
@@ -57,7 +46,7 @@ def animate_reset(ready=None, duration=SWEEP_SECONDS, timeout=15):
                 finish_at = max(duration, math.ceil(elapsed / SWEEP_SECONDS) * SWEEP_SECONDS)
             if finish_at is not None and elapsed >= finish_at:
                 return
-            if elapsed >= timeout:
+            if elapsed >= timeout and finish_at is None:
                 raise TimeoutError("The next mode did not become ready")
             device.display(map_serpentine(render_reset(elapsed)))
             pacer.wait()
@@ -65,7 +54,7 @@ def animate_reset(ready=None, duration=SWEEP_SECONDS, timeout=15):
         device.clear()
 
 
-def stop_process(process, timeout=2):
+def stop_process(process, timeout=STOP_TIMEOUT):
     process.terminate()
     try:
         process.wait(timeout=timeout)

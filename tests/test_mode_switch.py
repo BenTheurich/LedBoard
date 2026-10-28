@@ -8,6 +8,7 @@ from unittest.mock import Mock, call, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 import mode_switch
+from display_utils import STOP_TIMEOUT, render_sweep
 
 
 class FakeClock:
@@ -39,20 +40,22 @@ class TransitionTests(unittest.TestCase):
             mode_switch.get_matrix_device.cache_clear()
 
     def test_reset_frames_are_monochrome_full_panel_images_that_move(self):
-        frames = [mode_switch.render_reset(elapsed) for elapsed in (0.1, 0.2, 0.3)]
-        for frame in frames:
+        progress_values = (0.25, 0.5, 0.75)
+        frames = [mode_switch.render_reset(progress * mode_switch.SWEEP_SECONDS) for progress in progress_values]
+        for progress, frame in zip(progress_values, frames):
             self.assertEqual((frame.mode, frame.size), ("1", (64, 16)))
             self.assertIsNotNone(frame.getbbox())
+            self.assertEqual(frame.tobytes(), render_sweep(progress).tobytes())
         self.assertEqual(len({frame.tobytes() for frame in frames}), 3)
 
-    def test_animation_covers_preparation_and_finishes_with_a_clear(self):
+    def test_ready_finishes_current_sweep_even_after_preparation_deadline(self):
         clock = FakeClock()
         device = Mock()
         with patch.object(mode_switch, "get_matrix_device", return_value=device), \
                 patch.object(mode_switch.time, "monotonic", side_effect=lambda: clock.now), \
                 patch.object(mode_switch, "FramePacer") as pacer:
             pacer.return_value.wait.side_effect = clock.tick
-            mode_switch.animate_reset(lambda: clock.now >= 0.28, duration=0.12, timeout=1)
+            mode_switch.animate_reset(lambda: clock.now >= 0.28, timeout=0.35)
         self.assertGreaterEqual(clock.now, mode_switch.SWEEP_SECONDS)
         self.assertLess(clock.now, mode_switch.SWEEP_SECONDS + 0.08)
         self.assertGreater(device.display.call_count, 1)
@@ -79,9 +82,9 @@ class TransitionTests(unittest.TestCase):
                 patch.object(mode_switch.time, "monotonic", side_effect=lambda: clock.now), \
                 patch.object(mode_switch, "FramePacer") as pacer:
             pacer.return_value.wait.side_effect = clock.tick
-            mode_switch.animate_reset(duration=0.12)
-        self.assertGreaterEqual(clock.now, 0.12)
-        self.assertLess(clock.now, 0.2)
+            mode_switch.animate_reset()
+        self.assertGreaterEqual(clock.now, mode_switch.SWEEP_SECONDS)
+        self.assertLess(clock.now, mode_switch.SWEEP_SECONDS + 0.05)
         device.clear.assert_called_once_with()
 
     def test_timeout_and_preparation_failure_clear_the_panel(self):
@@ -166,7 +169,7 @@ class LaunchTests(unittest.TestCase):
                             mode_switch.launch_mode("clock.py")
                     self.assertEqual(os.read(go_reader[0], 1), b"")
                     process.terminate.assert_called_once_with()
-                    process.wait.assert_called_once_with(timeout=2)
+                    process.wait.assert_called_once_with(timeout=STOP_TIMEOUT)
                 finally:
                     for descriptor in go_reader:
                         os.close(descriptor)
@@ -194,9 +197,9 @@ class LaunchTests(unittest.TestCase):
 
     def test_stubborn_worker_is_killed_and_reaped(self):
         process = Mock()
-        process.wait.side_effect = [subprocess.TimeoutExpired("worker", 2), 0]
+        process.wait.side_effect = [subprocess.TimeoutExpired("worker", STOP_TIMEOUT), 0]
         mode_switch.stop_process(process)
-        self.assertEqual(process.method_calls, [call.terminate(), call.wait(timeout=2), call.kill(), call.wait()])
+        self.assertEqual(process.method_calls, [call.terminate(), call.wait(timeout=STOP_TIMEOUT), call.kill(), call.wait()])
 
 
 if __name__ == "__main__":
