@@ -13,7 +13,7 @@
             flex-direction: column;
             align-items: center;
             /* Changed from center to flex-start to prevent weird scrolling */
-            justify-content: flex-start; 
+            justify-content: flex-start;
             min-height: 100vh;
             margin: 0;
             padding: 40px 20px; /* Added top padding */
@@ -72,7 +72,7 @@
             justify-content: center;
             margin-top: 20px;
         }
-        
+
         button[value="Pong"] { border-left: 5px solid #03dac6; }
         button[value="Clock"] { border-left: 5px solid #bb86fc; }
         button[value="Bus Timetable"] { border-left: 5px solid #ffb74d; }
@@ -81,6 +81,78 @@
         button[value="Falling Sand"] { border-left: 5px solid #e4bf7b; }
         button[value="Drawing Harmonograph"] { border-left: 5px solid #b5a8e8; }
         button[value="Acid Rain"] { border-left: 5px solid #8fcf94; }
+
+        h2, .message-label {
+            display: block;
+            margin: 12px 0 0;
+            color: #aaa;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        textarea {
+            width: 100%;
+            box-sizing: border-box;
+            margin: 10px 0;
+            padding: 14px;
+            border: 1px solid #555;
+            border-radius: 12px;
+            background: #1e1e1e;
+            color: #e0e0e0;
+            font: inherit;
+            resize: vertical;
+        }
+        textarea:focus-visible, button:focus-visible, canvas:focus-visible, input:focus-visible {
+            outline: 2px solid #bb86fc;
+            outline-offset: 3px;
+        }
+        textarea::placeholder { color: #999; opacity: 1; }
+        button[value="Weather"] { border-left: 5px solid #80cbc4; }
+        .send-button {
+            background: #90caf9;
+            color: #102234;
+            justify-content: center;
+            gap: 10px;
+            padding: 16px 20px;
+            font-weight: 600;
+        }
+        .send-button:hover { background: #b1daff; }
+        .send-button:active { background: #79b9ed; }
+        .send-button svg { width: 22px; height: 22px; flex-shrink: 0; }
+        .editor-status, .zoom-label {
+            font-size: 0.9rem;
+            line-height: 1.5;
+            color: #bbb;
+        }
+        .editor-status { margin: 8px 0 0; }
+        .editor-status:empty { display: none; }
+        .editor-status.error { color: #ffb4b4; }
+        .drawing-tools { display: flex; flex-wrap: wrap; gap: 8px; }
+        .drawing-tools button {
+            width: auto;
+            min-width: 44px;
+            min-height: 44px;
+            padding: 10px 12px;
+            justify-content: center;
+            box-shadow: none;
+        }
+        .drawing-tools button { font-size: 1rem; }
+        .drawing-tools button[aria-pressed="true"] { background: #f4c47c; color: #121212; }
+        button:disabled { opacity: 0.5; cursor: default; }
+        .drawing-tools { margin: 12px 0; }
+        .drawing-viewport { overflow: auto; border: 1px solid #555; border-radius: 6px; }
+        #pixel-canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            touch-action: none;
+            user-select: none;
+            cursor: crosshair;
+        }
+        .zoom-label { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
+        .zoom-label input { flex: 1; min-width: 0; accent-color: #f4c47c; }
+        @media (prefers-reduced-motion: reduce) {
+            button, .indicator { transition: none; }
+        }
 
         /* The Dot Indicator */
         .indicator {
@@ -105,15 +177,54 @@
     <h1>Control Center</h1>
 
     <div class="grid">
-        {% for name, file in scripts.items() %}
-            {% if name != "OFF" %}
-                <form action="/run" method="post">
-                    <button type="submit" name="script_name" value="{{ name }}">
-                        {{ name }}
-                        <div class="indicator {% if name == active_script %}active{% endif %}"></div>
-                    </button>
-                </form>
-            {% endif %}
+        <h2>Everyday</h2>
+        {% for name in groups['Everyday'] %}
+            <form action="/run" method="post">
+                <button type="submit" name="script_name" value="{{ name }}"{% if name == 'Weather' %} title="Forecasts by Open-Meteo"{% endif %}>
+                    {{ name }}
+                    <span data-mode="{{ name }}" class="indicator {% if name == active_script %}active{% endif %}" aria-label="{{ 'Active' if name == active_script else 'Inactive' }}"></span>
+                </button>
+            </form>
+        {% endfor %}
+
+        <form id="message" action="/message#message" method="post">
+            <label class="message-label" for="message-text">Message</label>
+            <textarea id="message-text" name="message" rows="2" maxlength="{{ max_message_length }}" placeholder="Type your message here" autocomplete="off" required{% if message_error %} aria-invalid="true" aria-describedby="message-error" autofocus{% endif %}>{{ message_value }}</textarea>
+            <button class="send-button" type="submit" name="script_name" value="Message Board" aria-label="Send message">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+                <span class="send-label" aria-live="polite">Send</span>
+            </button>
+            <p class="editor-status{% if message_error %} error{% endif %}" id="message-error" role="status" aria-live="polite">{{ message_error or '' }}</p>
+        </form>
+
+        <form id="drawing" action="/drawing" method="post" data-width="{{ drawing_width }}" data-height="{{ drawing_height }}">
+            <h2 id="drawing-title">Pixel drawing</h2>
+            <div class="drawing-tools" role="group" aria-label="Drawing tools">
+                <button type="button" data-tool="draw" aria-pressed="true">Draw</button>
+                <button type="button" data-tool="erase" aria-pressed="false">Erase</button>
+                <button type="button" id="drawing-undo" disabled>Undo</button>
+                <button type="button" id="drawing-clear">Clear</button>
+            </div>
+            <div class="drawing-viewport">
+                <canvas id="pixel-canvas" width="768" height="192" tabindex="0" role="img" aria-label="64 by 16 pixel drawing editor. Arrow keys move; Space paints.">Enable JavaScript to draw on the matrix.</canvas>
+            </div>
+            <label class="zoom-label" for="drawing-zoom">Zoom <input id="drawing-zoom" type="range" min="1" max="3" step="0.5" value="1"><output id="zoom-value" for="drawing-zoom">1×</output></label>
+            <input type="hidden" name="pixels" id="drawing-pixels">
+            <button class="send-button" type="submit" name="script_name" value="Pixel Drawing" aria-label="Send drawing" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+                <span class="send-label" aria-live="polite">Send</span>
+            </button>
+            <p class="editor-status{% if drawing_error %} error{% endif %}" id="drawing-error" role="status" aria-live="polite">{{ drawing_error or '' }}</p>
+        </form>
+
+        <h2>Visualizers</h2>
+        {% for name in groups['Visualizers'] %}
+            <form action="/run" method="post">
+                <button type="submit" name="script_name" value="{{ name }}">
+                    {{ name }}
+                    <span data-mode="{{ name }}" class="indicator {% if name == active_script %}active{% endif %}" aria-label="{{ 'Active' if name == active_script else 'Inactive' }}"></span>
+                </button>
+            </form>
         {% endfor %}
 
         <form action="/run" method="post">
@@ -123,5 +234,6 @@
         </form>
     </div>
 
+    <script src="{{ url_for('static', filename='editors.js') }}" defer></script>
 </body>
 </html>

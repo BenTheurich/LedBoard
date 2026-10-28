@@ -1,21 +1,32 @@
 import subprocess
 import socket
 import threading
-from flask import Flask, render_template, request, redirect
+from flask import Flask, jsonify, render_template, request, redirect
+from message import MAX_MESSAGE_LENGTH, validate_message
+from drawing import WIDTH, HEIGHT, validate_pixels
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 4096
 
 # --- CONFIGURATION ---
 SCRIPTS = {
     "Clock": "clock.py",
     "Game of Life": "game_of_life.py",
     "Bus Timetable": "my_bus_script3.py",
+    "Weather": "weather.py",
+    "Message Board": "message.py",
+    "Pixel Drawing": "drawing.py",
     "Pong": "pong_explode2.py",
     "Music Visualizer": "visualizations.py",
     "Falling Sand": "falling_sand.py",
     "Drawing Harmonograph": "harmonograph.py",
     "Acid Rain": "acid_rain.py",
     "OFF": "clear_screen.py"
+}
+MODE_GROUPS = {
+    "Everyday": ("Clock", "Bus Timetable", "Weather"),
+    "Visualizers": ("Game of Life", "Pong", "Music Visualizer", "Falling Sand",
+                    "Drawing Harmonograph", "Acid Rain"),
 }
 
 current_process = None
@@ -75,30 +86,82 @@ def kill_current_process():
 
 @app.route("/")
 def index():
-    # Pass the active_script_name to the HTML
+    return controller_page()
+
+
+def controller_page(message_error=None, message_value="", drawing_error=None):
     with switch_lock:
         selected_script = active_script_name
-    return render_template("index.html", scripts=SCRIPTS, active_script=selected_script)
+    return render_template(
+        "index.html", groups=MODE_GROUPS, active_script=selected_script,
+        message_value=message_value,
+        message_error=message_error, max_message_length=MAX_MESSAGE_LENGTH,
+        drawing_error=drawing_error,
+        drawing_width=WIDTH, drawing_height=HEIGHT,
+    )
+
+
+def switch_program(script_name, extra_args=()):
+    """Caller holds switch_lock so every mode has one exclusive display owner."""
+    global current_process, active_script_name
+    print(f"Switching to: {script_name}")
+    kill_current_process()
+    active_script_name = "OFF"
+    subprocess.run(["python3", "clear_screen.py"])
+    if script_name != "OFF":
+        current_process = subprocess.Popen(["python3", SCRIPTS[script_name], *extra_args])
+    active_script_name = script_name
 
 @app.route("/run", methods=["POST"])
 def run_script():
-    global current_process, active_script_name
-    
     script_name = request.form.get("script_name")
-    filename = SCRIPTS.get(script_name)
-
-    if filename:
+    if script_name == "Message Board":
+        return redirect("/#message")
+    if script_name == "Pixel Drawing":
+        return redirect("/#drawing")
+    if script_name in SCRIPTS:
         with switch_lock:
-            print(f"Switching to: {script_name}")
-            kill_current_process()
-            active_script_name = "OFF"
-            subprocess.run(["python3", "clear_screen.py"])
-
-            if script_name != "OFF":
-                current_process = subprocess.Popen(["python3", filename])
-            active_script_name = script_name
-            
+            switch_program(script_name)
     return redirect("/")
+
+
+@app.route("/message", methods=["POST"])
+def send_message():
+    value = request.form.get("message", "")
+    try:
+        message = validate_message(value)
+    except ValueError as error:
+        if request.accept_mimetypes.best == "application/json":
+            return jsonify(error=str(error)), 400
+        return controller_page(message_error=str(error), message_value=value), 400
+    with switch_lock:
+        # One argument also preserves messages beginning with '-' for argparse.
+        switch_program("Message Board", ("--message=" + message,))
+    if request.accept_mimetypes.best == "application/json":
+        return jsonify(active_script="Message Board")
+    return controller_page(message_value=value)
+
+
+@app.route("/drawing", methods=["POST"])
+def send_drawing():
+    try:
+        pixels = validate_pixels(request.form.get("pixels", ""))
+    except ValueError as error:
+        if request.accept_mimetypes.best == "application/json":
+            return jsonify(error=str(error)), 400
+        return controller_page(drawing_error=str(error)), 400
+    with switch_lock:
+        switch_program("Pixel Drawing", ("--pixels=" + pixels,))
+    if request.accept_mimetypes.best == "application/json":
+        return jsonify(active_script="Pixel Drawing")
+    return redirect("/#drawing")
+
+
+@app.errorhandler(413)
+def message_too_large(error):
+    if request.accept_mimetypes.best == "application/json":
+        return jsonify(error="The request is too large. Use a shorter message."), 413
+    return controller_page(message_error="The request is too large. Use a shorter message."), 413
 
 if __name__ == "__main__":
     my_ip = get_ip_address()
@@ -106,4 +169,11 @@ if __name__ == "__main__":
         show_ip_on_matrix(my_ip)
     except Exception:
         pass
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    from browser_access import start_browser_access
+    browser_server = start_browser_access(app)
+    try:
+        app.run(host="0.0.0.0", port=5000, debug=False)
+    finally:
+        if browser_server is not None:
+            browser_server.shutdown()
+            browser_server.server_close()

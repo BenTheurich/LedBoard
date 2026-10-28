@@ -8,6 +8,8 @@ The board is assembled and running. Its Flask controller, display programs, and 
 
 Open the [controller](http://garching-board.local:5000/) on the local network. If local hostname discovery is unavailable, the controller is also reachable at `http://100.111.233.84:5000/` while connected to the same Tailscale network. It starts through the existing cron `@reboot` entry.
 
+For browser-only access, open the [password-protected controller](https://garching-board.tail8d1185.ts.net/). Visitors enter the shared username and password; they do not need Tailscale installed or an account. Tailscale Funnel forwards HTTPS requests to the controller's authenticated loopback listener. Keep the shared login details private.
+
 Wi-Fi prefers HHG and falls back to the phone hotspot. HHG access, hotspot fallback, and reconnection after reboot passed during the network setup session. See [Pi setup](docs/pi-setup.md) and [application dependencies and startup](docs/application.md).
 
 ## Hardware and intended display
@@ -27,6 +29,9 @@ The installed programs use SPI bus 0, device 0, with `cascaded=16`, `block_orien
 | Clock | [clock.py](app/clock.py) | Stretched hours, minutes, and seconds in fixed-width digit cells |
 | Game of Life | [game_of_life.py](app/game_of_life.py) | Cellular automaton |
 | Bus Timetable | [my_bus_script3.py](app/my_bus_script3.py) | Two-row scrolling departures with day/night brightness |
+| Weather | [weather.py](app/weather.py) | Four daily Celsius forecast points, plus labeled current conditions, high/low, and hourly rain screens |
+| Message Board | [message.py](app/message.py) | Send up to two lines from the controller; long rows scroll horizontally |
+| Pixel Drawing | [drawing.py](app/drawing.py) | Draw on the 64×16 grid using touch or a mouse, then send the image |
 | Pong | [pong_explode2.py](app/pong_explode2.py) | Animated Pong with particle effects |
 | Music Visualizer | [visualizations.py](app/visualizations.py) | Simulated spectrum bars; no audio input |
 | Falling Sand | [falling_sand.py](app/falling_sand.py) | Three random drop areas fill the screen; pouring pauses while a central opening widens to drain it |
@@ -35,6 +40,12 @@ The installed programs use SPI bus 0, device 0, with `cascaded=16`, `block_orien
 | TURN OFF | [clear_screen.py](app/clear_screen.py) | Clears the matrix |
 
 The bus program queries MVG through the Python `mvg` package for **Garching, Untere Straßäcker**, filtering lines **230**, **292**, and **X205** toward **Forschungszentrum**. It displays X205 as `205`. U6 departures at Garching-Forschungszentrum were part of the original goal and are not implemented in this selected program.
+
+The controller groups Clock, Bus Timetable, and Weather under **Everyday**, gives messages and pixel drawings their own editors, and groups animations under **Visualizers**. Sending text or a drawing selects that mode immediately and keeps the draft available for editing. Modes stay selected until changed through the controller; no automatic mode switching is configured. These changes require deploying the source files before they appear on the Pi.
+
+Weather uses [Open-Meteo](https://open-meteo.com/) without an API key. See [weather and messages](docs/application.md#weather-and-messages) for display pages, refresh behavior, and coordinates.
+
+For access from other residents' devices, see [sharing access](docs/application.md#sharing-access). The `100.111.233.84` address requires Tailscale; connecting to HHG Wi-Fi alone does not provide access to that address.
 
 ## Run a network check from Windows
 

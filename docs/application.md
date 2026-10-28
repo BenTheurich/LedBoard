@@ -13,11 +13,11 @@ cd /path/to/garching-board/app
 python3 app.py
 ```
 
-Do not start a second controller or display program while another process owns the matrices. The controller, clock, visualizer, Pong, Falling Sand, Drawing Harmonograph, and Acid Rain defer hardware initialization until execution so tests can import them safely. The other original display programs still initialize SPI at import and must not be imported for an ordinary desktop syntax check.
+Do not start a second controller or display program while another process owns the matrices. The controller, clock, bus timetable, visualizer, Pong, Falling Sand, Drawing Harmonograph, and Acid Rain defer hardware initialization until execution so tests can import them safely. Game of Life still initializes SPI at import and must not be imported for an ordinary desktop syntax check.
 
 The controller binds to `0.0.0.0:5000` with Flask debug mode disabled. At startup it tries to scroll its local IP address on the display. It then starts the web controller with the selected-program indicator set to OFF; there is no saved-mode restoration in the imported code. The page's `/run` POST route switches display programs.
 
-The UI has no authentication in this snapshot. Its intended access is through the local network or the existing Tailscale connection. No router forwarding, public hosting, or authentication changes were made during import.
+The local controller on port 5000 has no authentication. Its intended access is through the local network or the existing Tailscale connection. An optional, password-protected listener on loopback port 5001 provides browser access through Tailscale Funnel; see [sharing access](#sharing-access). No router forwarding is needed.
 
 ## Existing automatic startup
 
@@ -48,6 +48,50 @@ Falling Sand starts empty and releases eighteen grains per second. Each grain ch
 Sand movement uses a compact occupancy bitmask and simultaneous moves into cells that were empty at the start of each step. This prevents vacancies from pulling a whole row or column across the display in one update. Destination claims prevent colliding grains from merging. Filling advances at 18 steps per second and drainage at 36, with at most six simulation steps per render call. Images are built directly from packed bits; the byte-grid property is a fixture/debug snapshot outside the rendering path.
 
 Drawing Harmonograph keeps the selected trajectory and a tail capped at 180 samples. Acid Rain uses sixteen staggered, single-column pixel trails at 6–14 pixels per second, with two-pixel heads and dotted tails. Each trail falls through the bottom and recycles above the display after its tail exits. These three modes are directly available in the main controller; the temporary preview dashboard and rejected studies have been removed.
+
+## Weather and messages
+
+The controller's **Everyday** section contains Clock, Bus Timetable, and Weather. The separate message form selects Message Board when submitted; the animations are grouped under **Visualizers**. Selection remains manual. The controller still owns one display subprocess at a time.
+
+Weather shows four columns for today at 08:00, 12:00, 16:00, and 20:00. Hours occupy the top eight-pixel row, with Celsius temperatures on the bottom row. Both use seven-pixel-tall characters. Negative readings keep a visible minus sign; missing temperatures show `--C`. The fixed times include earlier points in the day and switch to the new local date at midnight. They are model forecasts, not a history of measured conditions.
+
+The four-point overview stays for sixteen seconds. Larger LCD text then shows separate cards for current temperature and conditions, today's `HIGH` and `LOW`, `RAIN TODAY` with chance and millimetres, and `FEELS` with `WIND` in km/h. Four more cards label the rain forecast at each time, such as `RAIN 08H`, with chance and millimetres. Each detail card stays for at least six seconds and allows longer rows to finish scrolling. All weather temperatures use Celsius; the complete cycle takes about sixty-four seconds for typical readings.
+
+Forecasts come from the [Open-Meteo Forecast API](https://open-meteo.com/en/docs), using Europe/Berlin local dates and Unix timestamps across daylight-saving changes. The default location is Garching at approximately 48.25° N, 11.65° E. Set `GARCHING_WEATHER_LATITUDE` and `GARCHING_WEATHER_LONGITUDE` in the controller's environment to override it. Pi OS supplies the IANA timezone database; a Windows development environment may need `tzdata` or an injected timezone in hardware-free previews. No runtime dependency has been added.
+
+Fetching runs in a background thread every ten minutes, with an eight-second request timeout and a one-minute retry after failure. Missing measurements show `--`. A failed refresh or data at least twenty minutes old replaces the forecast with `WEATHER OLD / RETRYING`; data at least two hours old shows `WEATHER / UNAVAILABLE`. Initial requests show `LOADING`. Cached daily values are selected by their local date, so yesterday's high and low are not labelled as today's.
+
+Messages accept up to 280 characters across two lines. Sending leaves the text editable so it can be modified and resent. JavaScript sends the form without navigating away; without JavaScript, the response also retains the submitted text. When browser session storage is available, text and drawing drafts survive reloads and mode changes within that tab. Drafts are stored locally in the browser, not shared with other visitors or saved on the Pi. Invalid submissions preserve the draft, keep the current mode running, and show an error beside the form.
+
+Short lines stay still; long lines scroll at twelve pixels per second with a two-second pause at each end. Keyboard punctuation and CP437 characters such as `ä`, `ü`, `ß`, `é`, `°`, and `£` render directly. A Unicode-to-CP437 adapter maps typed characters to the correct bitmap slots; a small added bitmap supports `€`. Supported accents remain intact; other Latin accents are simplified where possible. Smart quotes and dashes become ordinary punctuation. Unsupported glyphs produce an error rather than disappearing. The eight-pixel font cannot represent arbitrary Unicode or full-color emoji. Text is passed as a subprocess argument and is never executed as a shell command. The displayed message continues until another mode or message is selected.
+
+The pixel drawing editor mirrors all 64×16 pixels. Mouse dragging, touch, and keyboard arrows plus Space paint cells. Draw and Erase select the brush; Undo restores up to thirty previous strokes or clears. Zoom enlarges the grid within a horizontally scrollable viewport; use the scrollbar to reach off-screen columns. Sending keeps the drawing editable and displays it until another mode is selected. Clear only clears the local draft; send the blank drawing to clear the board. The `/drawing` POST route accepts a `pixels` form field containing exactly 1,024 `0` or `1` characters, in row order from top left. Validation happens before changing the active display process. Both editor endpoints return JSON when the request accepts `application/json`.
+
+`matrix_text.py` shares weather and message layout and caches glyph images so scrolling frames only crop pixels. Weather, messages, and drawings use `effect_runner.py` for matrix ownership, frame pacing, and clearing on exit. Deploy `weather.py`, `message.py`, `drawing.py`, `browser_access.py`, and `matrix_text.py` alongside the updated controller, `templates/index.html`, and `static/editors.js` in the existing flat `/home/ben` layout. Preserve the `templates/` and `static/` directories. Follow the staged tests and recovery procedure below before replacing live files.
+
+## Sharing access
+
+The controller already listens on all interfaces at port 5000. The documented `100.111.233.84` address belongs to Tailscale; residents connected only to HHG Wi-Fi need the Pi's current Wi-Fi IP instead. The `10.x` lease recorded in the setup notes may have changed. If the numeric Wi-Fi address works but `garching-board.local` does not, the issue is hostname discovery. If one resident can reach the numeric address and another cannot, HHG client isolation or separate VLANs are possible causes; the network policy has not been verified. An HHG administrator can confirm whether a shared-device network or exception is available.
+
+The existing Tailscale installation provides two alternatives:
+
+- [Device sharing](https://tailscale.com/docs/features/sharing) grants invited users access to the Pi through their own Tailscale accounts. Each visitor installs Tailscale and accepts the invitation. Restrict shared users to TCP port 5000 in the tailnet policy so controller access does not also grant network access to SSH or other Pi services.
+- [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel) can proxy local port 5000 through a public HTTPS URL. Visitors need only a browser; Cloudflare hosting, custom DNS, and router port forwarding are unnecessary. Funnel requires the documented tailnet permissions and HTTPS setup. The current controller has no authentication, so add access control before publishing it publicly.
+
+For password-protected Funnel access, the controller reads `/home/ben/.garching-board/browser-access.json` at startup. The private file contains `username`, a Werkzeug `password_hash`, and the exact HTTPS `public_origin`, and must have mode 0600. With this file present, `browser_access.py` starts a second HTTP listener at `127.0.0.1:5001` in the same process, sharing the controller's lock and active display state. Missing configuration opens no additional listener; invalid configuration fails before binding it. The existing cron entry starts both listeners after reboot.
+
+The public listener requires HTTP Basic authentication for every path, including assets. Browsers show their standard login prompt and remember the credentials for subsequent requests. Mutating requests must carry the configured public origin, preventing other websites from submitting commands using remembered credentials. Responses disable caching and framing. Only the successful authorization digest is cached in memory to avoid repeating password derivation for each asset on the Pi Zero. Passwords and hashes must stay out of Git and deployment logs.
+
+After verifying password protection locally, expose only that listener:
+
+```bash
+sudo tailscale funnel --bg --https=443 http://127.0.0.1:5001
+sudo tailscale funnel status --json
+```
+
+The `--bg` setting persists across Tailscale restarts and reboot. First use can require tailnet HTTPS/Funnel approval. To remove only this public listener, use `sudo tailscale funnel --bg --https=443 off`; avoid `reset`, which clears all Serve/Funnel configuration. HHG Wi-Fi settings and the application cron entry do not need to change.
+
+On 2026-10-28, code release `8700b333e74206bce5f433bef18b9dc4275dfe6a` was deployed and [public browser access](https://garching-board.tail8d1185.ts.net/) enabled. All 87 tests passed on both the desktop and Pi. Verification through a public relay confirmed anonymous requests receive 401, authenticated requests receive 200, the deployed JavaScript hash matches the release, and cross-origin submissions receive 403. Message and drawing submissions succeeded and Acid Rain was restored. The Tailscale service is enabled at boot and the Funnel mapping runs in background mode; this deployment did not reboot the Pi. The application backup is `/home/ben/.garching-board/backups/20261028-114118-8700b33/`.
 
 ## Hardware-free tests
 
@@ -112,4 +156,4 @@ Do not install a different GPIO backend over the working environment merely to s
 
 The programs use SPI bus 0 / device 0 and initialize MAX7219 with sixteen cascaded devices, block orientation -90°, and rotation 0°. The logical image is 64×16. Its top 64×8 row maps directly to physical pixels 0–63; its bottom row maps to pixels 64–127 with both X and Y reversed.
 
-`my_bus_script3.py` selects `Garching, Untere Straßäcker`, destination substring `Forschungszentrum`, and lines `230`, `292`, and `X205`. It shows at most eight matching departures and renders X205 as `205`. Day brightness is 32 from 07:00 until 20:00; night brightness is 10, using the Pi's local clock. It fetches another set of departures after each scrolling cycle. API exceptions and no matching departures both result in the current `No Bus Found` display, so the screen does not distinguish those cases.
+`my_bus_script3.py` selects `Garching, Untere Straßäcker`, destination substring `Forschungszentrum`, and lines `230`, `292`, and `X205`. It shows at most eight matching departures and renders X205 as `205`. The first pass pauses for ten seconds at every complete two-row view. After the final pair, it scrolls continuously back to the top without intermediate reading pauses, then fetches fresh departures. Both directions move one pixel every fifty milliseconds, with rendering time included in the frame budget; reading pauses restart the cadence without catch-up frames. Day brightness is 32 from 07:00 until 20:00; night brightness is 10, using the Pi's local clock. API exceptions and no matching departures both result in the current `No Bus Found` display, so the screen does not distinguish those cases.
