@@ -13,7 +13,7 @@ cd /path/to/garching-board/app
 python3 app.py
 ```
 
-Do not start a second controller or display program while another process owns the matrices. The controller, clock, bus timetable, visualizer, Pong, Falling Sand, Drawing Harmonograph, and Acid Rain defer hardware initialization until execution so tests can import them safely. Game of Life still initializes SPI at import and must not be imported for an ordinary desktop syntax check.
+Do not start a second controller or display program while another process owns the matrices. All selected display programs, including Game of Life, defer hardware initialization until execution so the launcher and tests can import them safely. The legacy `clear_screen.py` helper still initializes hardware at import; the controller no longer launches it during mode changes.
 
 The controller binds to `0.0.0.0:5000` with Flask debug mode disabled. At startup it tries to scroll its local IP address on the display. It then starts the web controller with the selected-program indicator set to OFF; there is no saved-mode restoration in the imported code. The page's `/run` POST route switches display programs.
 
@@ -33,7 +33,13 @@ For a future deployment at another path, update the working directory and startu
 
 ## Rendering and switching
 
-Program switches hold a lock across child termination, clearing, spawning, and selection-state updates. If a child ignores termination, it is killed and reaped before another program starts. This prevents overlapping requests from leaving multiple programs driving the display.
+Program switches hold a lock across child termination, preparation, the reset animation, display handoff, and selection-state updates. If a child ignores termination, it is killed and reaped before the controller writes to the board. The controller keeps one matrix handle, warmed during the startup IP scroll, for transitions and OFF. This removes the separate `clear_screen.py` interpreter and hardware initialization from each switch.
+
+The controller launches `mode_launcher.py` with dedicated readiness and handoff pipes. The child imports the selected program and display libraries without opening SPI, signals READY, and waits for GO. Meanwhile the controller draws a narrow, dithered reset sweep at a target of 40 FPS. Each sweep takes 0.45 seconds; it repeats while imports finish, then completes the current sweep and clears before granting GO. Only then does the child execute the display program. Child stdout and stderr remain inherited for ordinary logging. A preparation timeout or failure reaps the child and clears the display; JSON error responses also report the current mode so the browser does not retain a stale active indicator.
+
+Mode buttons submit asynchronously and show `Switching…` immediately. The OFF button shows `Clearing…`. Submit buttons stay disabled during a pending command, and message/drawing drafts remain editable. Without JavaScript, the existing form redirects still work. Game of Life starts without its old fixed one-second pause. Bus Timetable draws `BUS / LOADING` before importing the transit client and fetching its first departures.
+
+An import-only probe on the Pi on 2026-10-28 measured about 2.3 seconds for the old clear-only process and 2.6–2.7 seconds for message/visualizer process imports. The bus client import added about 5.7 seconds. These measurements did not open SPI or measure complete physical switches; actual handoff latency also includes process termination, hardware initialization, and the first mode frame.
 
 `display_utils.map_serpentine` uses Pillow crop, rotation, and paste operations instead of Python per-pixel loops. The visualizer, clock, bus scroll, and startup IP message share it. Pong's sparse point drawing is retained.
 
@@ -118,6 +124,8 @@ The suite compares the bulk mapping with the original pixel loop, checks every l
 Deployments keep the existing flat `/home/ben` layout and cron entry. Stage the release and run its tests before stopping the current controller. Save the current selection and back up every file being replaced, recording whether newly added helpers were previously absent. Backup directories use `/home/ben/.garching-board/backups/<timestamp>-<commit>/`.
 
 Stop the selected program through the controller, stop the identified controller process, replace the prepared files, and restart `/usr/bin/python3 /home/ben/app.py` with `/home/ben` as its working directory and output appended to `flask_log.txt`. Verify HTTP access, single-child switching, all display modes, and restore the saved selection after testing. Wi-Fi and cron settings do not need to change.
+
+For transition-enabled releases, include `mode_switch.py` and `mode_launcher.py` alongside the controller and updated mode files. A display child now appears in `/proc/<pid>/cmdline` as `python3 mode_launcher.py ... -- <mode-file> <mode-arguments>`. Deployment diagnostics must identify the mode after `--`, preserve its message/drawing arguments, and stop the launcher PID. Do not rely only on the second command-line argument matching a renderer filename.
 
 If verification fails, stop the new controller and its display child, restore the backed-up files, remove only helpers recorded as previously absent, and restart the backed-up controller with the saved selection. Keep release hashes and test results with the backup so the deployed revision can be identified.
 

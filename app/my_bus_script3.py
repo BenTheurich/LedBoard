@@ -195,6 +195,9 @@ def main():
                      block_orientation=-90, rotate=0)
     device.contrast(BRIGHTNESS_DAY)
     print(f"Starting 2-Row Bus Scroll... Day: {BRIGHTNESS_DAY} / Night: {BRIGHTNESS_NIGHT}")
+    # Give feedback before the transit client import and first network request.
+    loading, _ = create_tall_scroll_image(["BUS", "LOADING"])
+    show_window(loading, 0)
     try:
         while True:
             check_brightness()

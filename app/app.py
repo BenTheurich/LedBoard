@@ -1,9 +1,9 @@
-import subprocess
 import socket
 import threading
 from flask import Flask, jsonify, render_template, request, redirect
 from message import MAX_MESSAGE_LENGTH, validate_message
 from drawing import WIDTH, HEIGHT, validate_pixels
+from mode_switch import ModeStartError, animate_reset, get_matrix_device, launch_mode, stop_process
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 4096
@@ -47,15 +47,11 @@ def get_ip_address():
     return ip
 
 def show_ip_on_matrix(ip_addr):
-    from luma.core.interface.serial import spi, noop
-    from luma.led_matrix.device import max7219
     from luma.core.legacy import text, textsize
     from luma.core.legacy.font import proportional, CP437_FONT
     from display_utils import FramePacer, map_serpentine
 
-    # (Hardware setup hidden to save space - exact same as before)
-    serial = spi(port=0, device=0, gpio=noop())
-    device = max7219(serial, cascaded=16, block_orientation=-90, rotate=0)
+    device = get_matrix_device()
     device.contrast(32)
     msg = f"IP: {ip_addr}:5000"
     font = proportional(CP437_FONT)
@@ -76,12 +72,7 @@ def kill_current_process():
     # Called while switch_lock is held by the program-switch transaction.
     global current_process
     if current_process:
-        current_process.terminate()
-        try:
-            current_process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            current_process.kill()
-            current_process.wait()
+        stop_process(current_process)
         current_process = None
 
 @app.route("/")
@@ -104,12 +95,19 @@ def controller_page(message_error=None, message_value="", drawing_error=None):
 def switch_program(script_name, extra_args=()):
     """Caller holds switch_lock so every mode has one exclusive display owner."""
     global current_process, active_script_name
-    print(f"Switching to: {script_name}")
+    print(f"Switching to: {script_name}", flush=True)
     kill_current_process()
     active_script_name = "OFF"
-    subprocess.run(["python3", "clear_screen.py"])
-    if script_name != "OFF":
-        current_process = subprocess.Popen(["python3", SCRIPTS[script_name], *extra_args])
+    if script_name == "OFF":
+        try:
+            animate_reset()
+        except Exception as error:
+            raise ModeStartError("Could not clear the board. Try again.") from error
+    else:
+        try:
+            current_process = launch_mode(SCRIPTS[script_name], extra_args)
+        except ModeStartError as error:
+            raise ModeStartError(f"Could not start {script_name}. Try again.") from error
     active_script_name = script_name
 
 @app.route("/run", methods=["POST"])
@@ -122,7 +120,22 @@ def run_script():
     if script_name in SCRIPTS:
         with switch_lock:
             switch_program(script_name)
+            selected_script = active_script_name
+    else:
+        with switch_lock:
+            selected_script = active_script_name
+    if request.accept_mimetypes.best == "application/json":
+        return jsonify(active_script=selected_script)
     return redirect("/")
+
+
+@app.errorhandler(ModeStartError)
+def mode_start_failed(error):
+    if request.accept_mimetypes.best == "application/json":
+        with switch_lock:
+            selected_script = active_script_name
+        return jsonify(error=str(error), active_script=selected_script), 500
+    return str(error), 500
 
 
 @app.route("/message", methods=["POST"])

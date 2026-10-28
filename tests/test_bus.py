@@ -1,7 +1,8 @@
 from pathlib import Path
 import sys
+from types import ModuleType
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from PIL import Image
 
@@ -80,6 +81,42 @@ class BusScrollTests(unittest.TestCase):
         self.assertEqual((image.size, height), ((64, 16), 16))
         self.assertIsNotNone(image.crop((0, 0, 64, 8)).getbbox())
         self.assertIsNone(image.crop((0, 8, 64, 16)).getbbox())
+
+
+class BusStartupTests(unittest.TestCase):
+    def test_loading_frame_is_displayed_before_the_first_departure_fetch(self):
+        class StopStartup(Exception):
+            pass
+
+        device = Mock()
+        serial = ModuleType("luma.core.interface.serial")
+        serial.spi = Mock()
+        serial.noop = Mock()
+        matrix = ModuleType("luma.led_matrix.device")
+        matrix.max7219 = Mock(return_value=device)
+        modules = {
+            "luma.core.interface.serial": serial,
+            "luma.led_matrix": ModuleType("luma.led_matrix"),
+            "luma.led_matrix.device": matrix,
+        }
+        events = []
+        device.display.side_effect = lambda _: events.append("loading")
+
+        def fetch():
+            self.assertEqual(events, ["loading"])
+            events.append("fetch")
+            raise StopStartup
+
+        with patch.dict(sys.modules, modules), patch.object(bus, "device", None), \
+                patch.object(bus, "get_departures", side_effect=fetch):
+            with self.assertRaises(StopStartup):
+                bus.main()
+        self.assertEqual(events, ["loading", "fetch"])
+        device.display.assert_called_once()
+        image = device.display.call_args.args[0]
+        self.assertEqual((image.mode, image.size), ("1", (128, 8)))
+        self.assertIsNotNone(image.crop((0, 0, 64, 8)).getbbox())
+        self.assertIsNotNone(image.crop((64, 0, 128, 8)).getbbox())
 
 
 if __name__ == "__main__":
