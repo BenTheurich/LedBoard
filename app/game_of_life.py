@@ -1,34 +1,11 @@
 import time
 import random
-import copy 
-from luma.core.interface.serial import spi, noop
-from luma.led_matrix.device import max7219
-from luma.core.render import canvas
+import copy
 
-# --- HARDWARE SETUP ---
-serial = spi(port=0, device=0, gpio=noop())
-
-# UPDATE: cascaded=16 (4 boards x 4 matrices)
-# The Pi sees this as a strip 128 pixels wide and 8 pixels high.
-device = max7219(serial, cascaded=16, block_orientation=-90, rotate=0)
-
-# --- SAFETY SETTINGS ---
-# Keep contrast low (10-16) to prevent power crashes
-device.contrast(32)  
-SPEED = 0.05          
-
-# --- LOGICAL DIMENSIONS ---
-# We simulate a 16x64 grid
+SPEED = 0.05
 WIDTH = 64
-HEIGHT = 16 
+HEIGHT = 16
 
-# --- FLUSH ROUTINE ---
-# Clears garbage data from registers on startup to prevent "freak outs"
-print("Flushing display memory...")
-with canvas(device) as draw:
-    draw.rectangle(device.bounding_box, fill="black")
-time.sleep(1.0)
-print("Display cleared. Starting simulation...")
 
 class GameOfLife:
     def __init__(self, w, h):
@@ -119,27 +96,44 @@ class GameOfLife:
                     if phys_x < 128:
                         draw_obj.point((phys_x, phys_y), fill="white")
 
-# --- MAIN LOOP ---
-game = GameOfLife(WIDTH, HEIGHT)
+def main():
+    # Imports may be warmed before the launcher grants display ownership.
+    from luma.core.interface.serial import spi, noop
+    from luma.led_matrix.device import max7219
+    from luma.core.render import canvas
 
-try:
-    while True:
-        with canvas(device) as draw:
-            game.draw(draw)
-        
-        changes, alive_count = game.step()
-        
-        # Reset if empty, still, or stuck in a loop
-        if alive_count == 0 or changes == 0 or game.is_stuck_in_loop():
-            print("Simulation ended. Resetting...")
-            with canvas(device) as draw:
-                draw.rectangle(device.bounding_box, fill="black")
-            time.sleep(1.0) 
-            game.reset()
-        
-        time.sleep(SPEED)
+    serial = spi(port=0, device=0, gpio=noop())
+    device = max7219(serial, cascaded=16, block_orientation=-90, rotate=0)
+    device.contrast(32)
 
-except KeyboardInterrupt:
+    # Flush once, then render immediately instead of waiting a fixed second.
     with canvas(device) as draw:
         draw.rectangle(device.bounding_box, fill="black")
-    print("\nClean exit.")
+    print("Display cleared. Starting simulation...")
+    game = GameOfLife(WIDTH, HEIGHT)
+
+    try:
+        while True:
+            with canvas(device) as draw:
+                game.draw(draw)
+
+            changes, alive_count = game.step()
+
+            # Reset if empty, still, or stuck in a loop.
+            if alive_count == 0 or changes == 0 or game.is_stuck_in_loop():
+                print("Simulation ended. Resetting...")
+                with canvas(device) as draw:
+                    draw.rectangle(device.bounding_box, fill="black")
+                time.sleep(1.0)
+                game.reset()
+
+            time.sleep(SPEED)
+
+    except KeyboardInterrupt:
+        with canvas(device) as draw:
+            draw.rectangle(device.bounding_box, fill="black")
+        print("\nClean exit.")
+
+
+if __name__ == "__main__":
+    main()

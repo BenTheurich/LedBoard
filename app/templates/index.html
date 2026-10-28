@@ -138,6 +138,7 @@
         .drawing-tools button { font-size: 1rem; }
         .drawing-tools button[aria-pressed="true"] { background: #f4c47c; color: #121212; }
         button:disabled { opacity: 0.5; cursor: default; }
+        .mode-form[aria-busy="true"] button:disabled { opacity: 1; }
         .drawing-tools { margin: 12px 0; }
         .drawing-viewport { overflow: auto; border: 1px solid #555; border-radius: 6px; }
         #pixel-canvas {
@@ -179,11 +180,12 @@
     <div class="grid">
         <h2>Everyday</h2>
         {% for name in groups['Everyday'] %}
-            <form action="/run" method="post">
+            <form action="/run" method="post" class="mode-form">
                 <button type="submit" name="script_name" value="{{ name }}"{% if name == 'Weather' %} title="Forecasts by Open-Meteo"{% endif %}>
-                    {{ name }}
+                    <span class="mode-label">{{ name }}</span>
                     <span data-mode="{{ name }}" class="indicator {% if name == active_script %}active{% endif %}" aria-label="{{ 'Active' if name == active_script else 'Inactive' }}"></span>
                 </button>
+                <p class="editor-status" role="status" aria-live="polite"></p>
             </form>
         {% endfor %}
 
@@ -219,18 +221,20 @@
 
         <h2>Visualizers</h2>
         {% for name in groups['Visualizers'] %}
-            <form action="/run" method="post">
+            <form action="/run" method="post" class="mode-form">
                 <button type="submit" name="script_name" value="{{ name }}">
-                    {{ name }}
+                    <span class="mode-label">{{ name }}</span>
                     <span data-mode="{{ name }}" class="indicator {% if name == active_script %}active{% endif %}" aria-label="{{ 'Active' if name == active_script else 'Inactive' }}"></span>
                 </button>
+                <p class="editor-status" role="status" aria-live="polite"></p>
             </form>
         {% endfor %}
 
-        <form action="/run" method="post">
+        <form action="/run" method="post" class="mode-form">
             <button type="submit" name="script_name" value="OFF">
-                TURN OFF
+                <span class="mode-label">TURN OFF</span>
             </button>
+            <p class="editor-status" role="status" aria-live="polite"></p>
         </form>
     </div>
 

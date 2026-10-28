@@ -1,9 +1,10 @@
-import subprocess
 import socket
 import threading
 from flask import Flask, jsonify, render_template, request, redirect
 from message import MAX_MESSAGE_LENGTH, validate_message
 from drawing import WIDTH, HEIGHT, validate_pixels
+from mode_switch import (ModeStartError, clear_display, get_display_owner,
+                         launch_mode, shutdown_display, stop_process)
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 4096
@@ -47,16 +48,11 @@ def get_ip_address():
     return ip
 
 def show_ip_on_matrix(ip_addr):
-    from luma.core.interface.serial import spi, noop
-    from luma.led_matrix.device import max7219
     from luma.core.legacy import text, textsize
     from luma.core.legacy.font import proportional, CP437_FONT
     from display_utils import FramePacer, map_serpentine
 
-    # (Hardware setup hidden to save space - exact same as before)
-    serial = spi(port=0, device=0, gpio=noop())
-    device = max7219(serial, cascaded=16, block_orientation=-90, rotate=0)
-    device.contrast(32)
+    display = get_display_owner()
     msg = f"IP: {ip_addr}:5000"
     font = proportional(CP437_FONT)
     w, h = textsize(msg, font)
@@ -68,22 +64,10 @@ def show_ip_on_matrix(ip_addr):
     pacer = FramePacer(12)
     for _ in range(2):
         for x in range(w + 128 - 64):
-            device.display(map_serpentine(img.crop((x, 0, x + 64, 16))))
+            display.show_frame(map_serpentine(img.crop((x, 0, x + 64, 16))))
             pacer.wait()
 
 # --- FLASK ROUTES ---
-def kill_current_process():
-    # Called while switch_lock is held by the program-switch transaction.
-    global current_process
-    if current_process:
-        current_process.terminate()
-        try:
-            current_process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            current_process.kill()
-            current_process.wait()
-        current_process = None
-
 @app.route("/")
 def index():
     return controller_page()
@@ -102,14 +86,21 @@ def controller_page(message_error=None, message_value="", drawing_error=None):
 
 
 def switch_program(script_name, extra_args=()):
-    """Caller holds switch_lock so every mode has one exclusive display owner."""
+    """Serialize selection changes while the owner continues drawing."""
     global current_process, active_script_name
-    print(f"Switching to: {script_name}")
-    kill_current_process()
+    print(f"Switching to: {script_name}", flush=True)
+    previous, current_process = current_process, None
     active_script_name = "OFF"
-    subprocess.run(["python3", "clear_screen.py"])
-    if script_name != "OFF":
-        current_process = subprocess.Popen(["python3", SCRIPTS[script_name], *extra_args])
+    if script_name == "OFF":
+        try:
+            clear_display(previous=previous)
+        except Exception as error:
+            raise ModeStartError("Could not clear the board. Try again.") from error
+    else:
+        try:
+            current_process = launch_mode(SCRIPTS[script_name], extra_args, previous=previous)
+        except ModeStartError as error:
+            raise ModeStartError(f"Could not start {script_name}. Try again.") from error
     active_script_name = script_name
 
 @app.route("/run", methods=["POST"])
@@ -122,7 +113,22 @@ def run_script():
     if script_name in SCRIPTS:
         with switch_lock:
             switch_program(script_name)
+            selected_script = active_script_name
+    else:
+        with switch_lock:
+            selected_script = active_script_name
+    if request.accept_mimetypes.best == "application/json":
+        return jsonify(active_script=selected_script)
     return redirect("/")
+
+
+@app.errorhandler(ModeStartError)
+def mode_start_failed(error):
+    if request.accept_mimetypes.best == "application/json":
+        with switch_lock:
+            selected_script = active_script_name
+        return jsonify(error=str(error), active_script=selected_script), 500
+    return str(error), 500
 
 
 @app.route("/message", methods=["POST"])
@@ -177,3 +183,6 @@ if __name__ == "__main__":
         if browser_server is not None:
             browser_server.shutdown()
             browser_server.server_close()
+        if current_process is not None:
+            stop_process(current_process)
+        shutdown_display()

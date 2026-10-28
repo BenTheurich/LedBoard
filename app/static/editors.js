@@ -149,6 +149,72 @@
     render();
     form.querySelector('[type="submit"]').disabled = false;
 
+    let sending = false;
+    function beginSubmission() {
+        if (sending) return null;
+        sending = true;
+        const buttons = Array.from(document.querySelectorAll('button[type="submit"]'));
+        const disabled = buttons.map(button => button.disabled);
+        buttons.forEach(button => { button.disabled = true; });
+        return () => {
+            buttons.forEach((button, index) => { button.disabled = disabled[index]; });
+            sending = false;
+        };
+    }
+
+    async function postForm(editor, payload) {
+        const controller = new AbortController();
+        // Preparation may include a network fetch plus complete wipe passes.
+        const timeout = setTimeout(() => controller.abort(), 35000);
+        try {
+            const response = await fetch(editor.action, {
+                method: "POST", body: payload,
+                headers: {Accept: "application/json"}, signal: controller.signal,
+            });
+            const result = await response.json().catch(() => ({error: "The board could not complete the switch. Try again."}));
+            if (typeof result.active_script === 'string') {
+                document.querySelectorAll("[data-mode]").forEach(indicator => {
+                    const active = indicator.dataset.mode === result.active_script;
+                    indicator.classList.toggle("active", active);
+                    indicator.setAttribute("aria-label", active ? "Active" : "Inactive");
+                });
+            }
+            if (!response.ok || typeof result.active_script !== 'string') throw new Error(result.error || "Could not send. Try again.");
+            return result;
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
+    document.querySelectorAll('.mode-form').forEach(editor => {
+        const button = editor.querySelector('[type="submit"]');
+        const label = button.querySelector('.mode-label');
+        const status = editor.querySelector('.editor-status');
+        editor.addEventListener('submit', async event => {
+            event.preventDefault();
+            const payload = new FormData(editor);
+            payload.set('script_name', button.value);
+            const finish = beginSubmission();
+            if (!finish) return;
+            const original = label.textContent;
+            label.textContent = button.value === 'OFF' ? 'Clearing…' : 'Switching…';
+            editor.setAttribute('aria-busy', 'true');
+            status.textContent = '';
+            status.classList.remove('error');
+            try {
+                await postForm(editor, payload);
+            } catch (error) {
+                status.classList.add('error');
+                status.textContent = error instanceof TypeError || error.name === 'AbortError'
+                    ? 'Could not reach the board. Try selecting the mode again.' : error.message;
+            } finally {
+                label.textContent = original;
+                editor.removeAttribute('aria-busy');
+                finish();
+            }
+        });
+    });
+
     for (const id of ["message", "drawing"]) {
         const editor = document.getElementById(id);
         const status = document.getElementById(`${id}-error`);
@@ -157,28 +223,17 @@
         let feedbackTimer;
         editor.addEventListener("submit", async event => {
             event.preventDefault();
-            if (submit.disabled) return;
+            const payload = new FormData(editor);
+            const finish = beginSubmission();
+            if (!finish) return;
             save("matrix-message", message.value);
             save("matrix-drawing", field.value);
-            submit.disabled = true;
             clearTimeout(feedbackTimer);
             status.classList.remove("error");
             status.textContent = "";
             label.textContent = "Sending…";
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 15000);
             try {
-                const response = await fetch(editor.action, {
-                    method: "POST", body: new FormData(editor),
-                    headers: {Accept: "application/json"}, signal: controller.signal,
-                });
-                const result = await response.json();
-                if (!response.ok) throw new Error(result.error || "Could not send. Try again.");
-                document.querySelectorAll("[data-mode]").forEach(indicator => {
-                    const active = indicator.dataset.mode === result.active_script;
-                    indicator.classList.toggle("active", active);
-                    indicator.setAttribute("aria-label", active ? "Active" : "Inactive");
-                });
+                await postForm(editor, payload);
                 message.removeAttribute("aria-invalid");
                 label.textContent = "Sent";
                 feedbackTimer = setTimeout(() => { label.textContent = "Send"; }, 2000);
@@ -189,8 +244,7 @@
                     ? "Could not reach the board. Your draft is still here; try sending again."
                     : error.message;
             } finally {
-                clearTimeout(timeout);
-                submit.disabled = false;
+                finish();
             }
         });
     }

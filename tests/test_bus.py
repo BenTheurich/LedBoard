@@ -1,7 +1,9 @@
 from pathlib import Path
 import sys
+import threading
+from types import ModuleType
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from PIL import Image
 
@@ -80,6 +82,119 @@ class BusScrollTests(unittest.TestCase):
         self.assertEqual((image.size, height), ((64, 16), 16))
         self.assertIsNotNone(image.crop((0, 0, 64, 8)).getbbox())
         self.assertIsNone(image.crop((0, 8, 64, 16)).getbbox())
+
+
+class BusStartupTests(unittest.TestCase):
+    def test_loading_frame_is_displayed_before_the_first_departure_fetch(self):
+        class StopStartup(Exception):
+            pass
+
+        device = Mock(spec=["display", "contrast"])
+        serial = ModuleType("luma.core.interface.serial")
+        serial.spi = Mock()
+        serial.noop = Mock()
+        matrix = ModuleType("luma.led_matrix.device")
+        matrix.max7219 = Mock(return_value=device)
+        modules = {
+            "luma.core.interface.serial": serial,
+            "luma.led_matrix": ModuleType("luma.led_matrix"),
+            "luma.led_matrix.device": matrix,
+        }
+        events = []
+        device.display.side_effect = lambda _: events.append("loading")
+
+        def fetch():
+            self.assertEqual(events, ["loading"])
+            events.append("fetch")
+            return []
+
+        with patch.dict(sys.modules, modules), patch.object(bus, "device", None), \
+                patch.object(bus, "get_departures", side_effect=fetch), \
+                patch.object(bus, "run_vertical_scroll", side_effect=StopStartup):
+            with self.assertRaises(StopStartup):
+                bus.main()
+        self.assertEqual(events, ["loading", "fetch"])
+        device.display.assert_called_once()
+        image = device.display.call_args.args[0]
+        self.assertEqual((image.mode, image.size), ("1", (128, 8)))
+        self.assertIsNotNone(image.crop((0, 0, 64, 8)).getbbox())
+        self.assertIsNotNone(image.crop((64, 0, 128, 8)).getbbox())
+
+    def test_worker_loading_does_not_become_ready_before_fetching(self):
+        device = Mock(spec=["display", "display_loading", "contrast"])
+        serial = ModuleType("luma.core.interface.serial")
+        serial.spi, serial.noop = Mock(), Mock()
+        matrix = ModuleType("luma.led_matrix.device")
+        matrix.max7219 = Mock(return_value=device)
+        modules = {"luma.core.interface.serial": serial,
+                   "luma.led_matrix": ModuleType("luma.led_matrix"),
+                   "luma.led_matrix.device": matrix}
+
+        def fetch():
+            device.display_loading.assert_called_once()
+            device.display.assert_not_called()
+            return [("230:", "5m")]
+
+        with patch.dict(sys.modules, modules), patch.object(bus, "device", None), \
+                patch.object(bus, "get_departures", side_effect=fetch), \
+                patch.object(bus.time, "sleep", side_effect=KeyboardInterrupt):
+            bus.main()
+        device.display.assert_called_once()
+        self.assertEqual(device.display.call_args.args[0].size, (128, 8))
+
+    def test_slow_fetch_renders_no_bus_then_reuses_and_consumes_the_pending_request(self):
+        device = Mock(spec=["display", "display_loading", "contrast"])
+        serial = ModuleType("luma.core.interface.serial")
+        serial.spi, serial.noop = Mock(), Mock()
+        matrix = ModuleType("luma.led_matrix.device")
+        matrix.max7219 = Mock(return_value=device)
+        modules = {"luma.core.interface.serial": serial,
+                   "luma.led_matrix": ModuleType("luma.led_matrix"),
+                   "luma.led_matrix.device": matrix}
+        release = threading.Event()
+        entered = threading.Event()
+        departures = [("230:", "5m")]
+        fetcher = bus.DepartureFetch()
+
+        def fetch():
+            entered.set()
+            if not release.wait(2):
+                raise TimeoutError("Test did not release the fetch")
+            return departures
+
+        try:
+            with patch.dict(sys.modules, modules), patch.object(bus, "device", None), \
+                    patch.object(bus, "DepartureFetch", return_value=fetcher), \
+                    patch.object(bus, "FETCH_TIMEOUT", .001), \
+                    patch.object(bus, "get_departures", side_effect=fetch) as get_departures, \
+                    patch.object(bus.time, "sleep", side_effect=KeyboardInterrupt), patch("builtins.print") as log:
+                bus.main()
+                self.assertTrue(entered.wait(1))
+                device.display_loading.assert_called_once()
+                device.display.assert_called_once()
+                no_bus, _ = bus.create_tall_scroll_image([])
+                self.assertEqual(device.display.call_args.args[0].tobytes(),
+                                 bus.map_serpentine(no_bus).tobytes())
+                self.assertEqual(fetcher.get(timeout=0), [])
+                self.assertEqual(get_departures.call_count, 1, "A pending fetch was duplicated")
+                self.assertTrue(any("still pending" in call.args[0] and call.kwargs.get("flush")
+                                    for call in log.call_args_list))
+                release.set()
+                self.assertEqual(fetcher.get(timeout=1), departures)
+                self.assertEqual(get_departures.call_count, 1, "Completed data was replaced before use")
+                self.assertEqual(fetcher.get(timeout=1), departures)
+                self.assertEqual(get_departures.call_count, 2)
+        finally:
+            release.set()
+
+    def test_client_import_failure_becomes_no_bus_and_allows_a_later_retry(self):
+        fetcher = bus.DepartureFetch()
+        departures = [("292:", "2m")]
+        with patch.object(bus, "get_departures", side_effect=[ImportError("client unavailable"), departures]), \
+                patch("builtins.print") as log:
+            self.assertEqual(fetcher.get(timeout=1), [])
+            log.assert_called_once_with("API Error: client unavailable", flush=True)
+            self.assertEqual(fetcher.get(timeout=1), departures)
 
 
 if __name__ == "__main__":

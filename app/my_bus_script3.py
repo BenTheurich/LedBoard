@@ -1,8 +1,9 @@
 import time
-from datetime import datetime
+import threading
 from luma.core.legacy import text, textsize
 from luma.core.legacy.font import proportional, CP437_FONT
 from PIL import Image, ImageDraw
+from display_brightness import BRIGHTNESS_DAY, BRIGHTNESS_NIGHT, brightness_for_time
 from display_utils import FramePacer, map_serpentine
 
 # --- CONFIGURATION ---
@@ -10,15 +11,10 @@ SEARCH_NAME = "Garching, Untere Straßäcker"
 TARGET_DEST = "Forschungszentrum"
 TARGET_LINES = ["230", "292", "X205"]
 
-# --- BRIGHTNESS SETTINGS ---
-BRIGHTNESS_DAY = 32   
-BRIGHTNESS_NIGHT = 10 
-HOUR_DAY_START = 7    
-HOUR_NIGHT_START = 20 
-
 # --- ANIMATION SETTINGS ---
 SCROLL_SPEED = 0.05    # One pixel every 50 ms, including rendering time
 PAUSE_AT_ROWS = 10.0   # Reading time while advancing through departures
+FETCH_TIMEOUT = 12.0  # Includes client imports and requests before the first ready frame.
 
 # --- HARDWARE ---
 device = None  # Initialized only when this script runs on the Pi.
@@ -33,11 +29,7 @@ found_station_id = None
 # --- HELPER FUNCTIONS ---
 
 def check_brightness():
-    now = datetime.now()
-    if HOUR_DAY_START <= now.hour < HOUR_NIGHT_START:
-        device.contrast(BRIGHTNESS_DAY)
-    else:
-        device.contrast(BRIGHTNESS_NIGHT)
+    device.contrast(brightness_for_time())
 
 def get_departures():
     from mvg import MvgApi
@@ -45,7 +37,7 @@ def get_departures():
     global found_station_id
     try:
         if found_station_id is None:
-            print(f"Searching for '{SEARCH_NAME}'...")
+            print(f"Searching for '{SEARCH_NAME}'...", flush=True)
             station = MvgApi.station(SEARCH_NAME)
             if station:
                 found_station_id = station['id']
@@ -84,9 +76,39 @@ def get_departures():
         return next_busses
 
     except Exception as e:
-        print(f"API Error: {e}")
+        print(f"API Error: {e}", flush=True)
         found_station_id = None 
         return []
+
+class DepartureFetch:
+    """Bound display waiting while retaining one request until its result is used."""
+
+    def __init__(self):
+        self._pending = None
+        self._result = []
+
+    def _fetch(self, done):
+        try:
+            self._result = get_departures()
+        except Exception as error:
+            # Client import failures happen before get_departures' API handler.
+            print(f"API Error: {error}", flush=True)
+            self._result = []
+        finally:
+            done.set()
+
+    def get(self, timeout=FETCH_TIMEOUT):
+        if self._pending is None:
+            self._pending = threading.Event()
+            threading.Thread(target=self._fetch, args=(self._pending,),
+                             name="bus-fetch", daemon=True).start()
+        if not self._pending.wait(timeout):
+            print(f"Bus update still pending after {timeout:g}s; displaying No Bus Found", flush=True)
+            return []
+        result = self._result
+        self._pending = None
+        return result
+
 
 def render_bus_image(bus_data):
     """Creates a static 64x8 image for a single bus with DOTS."""
@@ -193,12 +215,16 @@ def main():
 
     device = max7219(spi(port=0, device=0, gpio=noop()), cascaded=16,
                      block_orientation=-90, rotate=0)
-    device.contrast(BRIGHTNESS_DAY)
-    print(f"Starting 2-Row Bus Scroll... Day: {BRIGHTNESS_DAY} / Night: {BRIGHTNESS_NIGHT}")
+    check_brightness()
+    print(f"Starting 2-Row Bus Scroll... Day: {BRIGHTNESS_DAY} / Night: {BRIGHTNESS_NIGHT}", flush=True)
+    # Standalone hardware shows loading; workers remain unready until fetching ends.
+    loading, _ = create_tall_scroll_image(["BUS", "LOADING"])
+    getattr(device, "display_loading", device.display)(map_serpentine(loading))
+    fetcher = DepartureFetch()
     try:
         while True:
             check_brightness()
-            busses = get_departures()
+            busses = fetcher.get(timeout=FETCH_TIMEOUT)
             run_vertical_scroll(busses)
             if not busses:
                 time.sleep(5)
