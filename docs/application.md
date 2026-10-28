@@ -17,7 +17,7 @@ Do not start a second controller or display program while another process owns t
 
 The controller binds to `0.0.0.0:5000` with Flask debug mode disabled. At startup it tries to scroll its local IP address on the display. It then starts the web controller with the selected-program indicator set to OFF; there is no saved-mode restoration in the imported code. The page's `/run` POST route switches display programs.
 
-The UI has no authentication in this snapshot. Its intended access is through the local network or the existing Tailscale connection. No router forwarding, public hosting, or authentication changes were made during import.
+The local controller on port 5000 has no authentication. Its intended access is through the local network or the existing Tailscale connection. An optional, password-protected listener on loopback port 5001 provides browser access through Tailscale Funnel; see [sharing access](#sharing-access). No router forwarding is needed.
 
 ## Existing automatic startup
 
@@ -61,9 +61,35 @@ Forecasts come from the [Open-Meteo Forecast API](https://open-meteo.com/en/docs
 
 Fetching runs in a background thread every ten minutes, with an eight-second request timeout and a one-minute retry after failure. Missing measurements show `--`. A failed refresh or data at least twenty minutes old replaces the forecast with `WEATHER OLD / RETRYING`; data at least two hours old shows `WEATHER / UNAVAILABLE`. Initial requests show `LOADING`. Cached daily values are selected by their local date, so yesterday's high and low are not labelled as today's.
 
-Messages accept up to 280 characters across two lines. The form starts blank with the placeholder `Type your message here` and clears after a successful send. Invalid submissions preserve the draft, keep the current mode running, and show an error beside the form. Short lines stay still; long lines scroll at twelve pixels per second with a two-second pause at each end. Latin accents and German umlauts are transliterated to the matrix font, while unsupported characters such as emoji are rejected. Text is passed as a subprocess argument and is never executed as a shell command. The displayed message continues until another mode or message is selected; the application does not save messages to disk.
+Messages accept up to 280 characters across two lines. Sending leaves the text editable so it can be modified and resent. JavaScript sends the form without navigating away; without JavaScript, the response also retains the submitted text. When browser session storage is available, text and drawing drafts survive reloads and mode changes within that tab. Drafts are stored locally in the browser, not shared with other visitors or saved on the Pi. Invalid submissions preserve the draft, keep the current mode running, and show an error beside the form.
 
-`matrix_text.py` shares text layout between both modes and caches glyph images so scrolling frames only crop pixels. Both new modes use `effect_runner.py` for matrix ownership, frame pacing, and clearing on exit. Deploy `weather.py`, `message.py`, and `matrix_text.py` alongside the updated controller and template in the existing flat `/home/ben` layout. Follow the staged tests and recovery procedure below before replacing live files.
+Short lines stay still; long lines scroll at twelve pixels per second with a two-second pause at each end. Keyboard punctuation and CP437 characters such as `ä`, `ü`, `ß`, `é`, `°`, and `£` render directly. A Unicode-to-CP437 adapter maps typed characters to the correct bitmap slots; a small added bitmap supports `€`. Supported accents remain intact; other Latin accents are simplified where possible. Smart quotes and dashes become ordinary punctuation. Unsupported glyphs produce an error rather than disappearing. The eight-pixel font cannot represent arbitrary Unicode or full-color emoji. Text is passed as a subprocess argument and is never executed as a shell command. The displayed message continues until another mode or message is selected.
+
+The pixel drawing editor mirrors all 64×16 pixels. Mouse dragging, touch, and keyboard arrows plus Space paint cells. Draw and Erase select the brush; Undo restores up to thirty previous strokes or clears. Zoom enlarges the grid within a horizontally scrollable viewport; use the scrollbar to reach off-screen columns. Sending keeps the drawing editable and displays it until another mode is selected. Clear only clears the local draft; send the blank drawing to clear the board. The `/drawing` POST route accepts a `pixels` form field containing exactly 1,024 `0` or `1` characters, in row order from top left. Validation happens before changing the active display process. Both editor endpoints return JSON when the request accepts `application/json`.
+
+`matrix_text.py` shares weather and message layout and caches glyph images so scrolling frames only crop pixels. Weather, messages, and drawings use `effect_runner.py` for matrix ownership, frame pacing, and clearing on exit. Deploy `weather.py`, `message.py`, `drawing.py`, `browser_access.py`, and `matrix_text.py` alongside the updated controller, `templates/index.html`, and `static/editors.js` in the existing flat `/home/ben` layout. Preserve the `templates/` and `static/` directories. Follow the staged tests and recovery procedure below before replacing live files.
+
+## Sharing access
+
+The controller already listens on all interfaces at port 5000. The documented `100.111.233.84` address belongs to Tailscale; residents connected only to HHG Wi-Fi need the Pi's current Wi-Fi IP instead. The `10.x` lease recorded in the setup notes may have changed. If the numeric Wi-Fi address works but `garching-board.local` does not, the issue is hostname discovery. If one resident can reach the numeric address and another cannot, HHG client isolation or separate VLANs are possible causes; the network policy has not been verified. An HHG administrator can confirm whether a shared-device network or exception is available.
+
+The existing Tailscale installation provides two alternatives:
+
+- [Device sharing](https://tailscale.com/docs/features/sharing) grants invited users access to the Pi through their own Tailscale accounts. Each visitor installs Tailscale and accepts the invitation. Restrict shared users to TCP port 5000 in the tailnet policy so controller access does not also grant network access to SSH or other Pi services.
+- [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel) can proxy local port 5000 through a public HTTPS URL. Visitors need only a browser; Cloudflare hosting, custom DNS, and router port forwarding are unnecessary. Funnel requires the documented tailnet permissions and HTTPS setup. The current controller has no authentication, so add access control before publishing it publicly.
+
+For password-protected Funnel access, the controller reads `/home/ben/.garching-board/browser-access.json` at startup. The private file contains `username`, a Werkzeug `password_hash`, and the exact HTTPS `public_origin`, and must have mode 0600. With this file present, `browser_access.py` starts a second HTTP listener at `127.0.0.1:5001` in the same process, sharing the controller's lock and active display state. Missing configuration opens no additional listener; invalid configuration fails before binding it. The existing cron entry starts both listeners after reboot.
+
+The public listener requires HTTP Basic authentication for every path, including assets. Browsers show their standard login prompt and remember the credentials for subsequent requests. Mutating requests must carry the configured public origin, preventing other websites from submitting commands using remembered credentials. Responses disable caching and framing. Only the successful authorization digest is cached in memory to avoid repeating password derivation for each asset on the Pi Zero. Passwords and hashes must stay out of Git and deployment logs.
+
+After verifying password protection locally, expose only that listener:
+
+```bash
+sudo tailscale funnel --bg --https=443 http://127.0.0.1:5001
+sudo tailscale funnel status --json
+```
+
+The `--bg` setting persists across Tailscale restarts and reboot. First use can require tailnet HTTPS/Funnel approval. To remove only this public listener, use `sudo tailscale funnel --bg --https=443 off`; avoid `reset`, which clears all Serve/Funnel configuration. HHG Wi-Fi settings and the application cron entry do not need to change.
 
 ## Hardware-free tests
 
