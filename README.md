@@ -2,7 +2,7 @@
 
 A 64×16 LED display I built for my desk using a Raspberry Pi Zero WH and MAX7219 matrices. It shows the time, live bus departures, weather, and pixel animations. A Flask web controller lets me switch modes, send messages, and draw on the display from a phone or laptop.
 
-[Watch the demo video](https://photos.app.goo.gl/hk6Wh3szRpFf2oQn9)
+[Watch the demo video](https://photos.google.com/share/AF1QipNOc32biwCpALE7iZqi61sBdthm-AGxb90jAhmkWQjUXPC99zsiK7GEY5G4OjBObw/photo/AF1QipMrXEdKHhnZgmrI52Dlr05eTZkYTQFsSsEsmqUG?key=b09VeXFpTjVEZ0NWTUp1U2I2Nm5oc0VxUXlxMHpB)
 
 ![LedBoard showing a clock, with the Raspberry Pi and wiring visible on the desk](docs/images/ledboard.webp)
 
