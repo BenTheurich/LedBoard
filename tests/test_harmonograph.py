@@ -16,6 +16,10 @@ class HarmonographTests(unittest.TestCase):
             self.assertLessEqual(len(mode.trail), 180)
         self.assertNotEqual(image.tobytes(), first)
         self.assertIsNotNone(image.getbbox())
+        self.assertEqual(image.getbbox()[1::2], (0, 16))
+        # The horizontal envelope expands and contracts over its full cycle.
+        columns = [mode._point(index / 20)[0] for index in range(20 * 630)]
+        self.assertEqual((min(columns), max(columns)), (0, 63))
 
     def test_a_pause_does_not_build_a_catch_up_backlog(self):
         mode = Harmonograph()
