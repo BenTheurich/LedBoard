@@ -101,7 +101,7 @@
             font: inherit;
             resize: vertical;
         }
-        textarea:focus-visible, button:focus-visible, canvas:focus-visible, input:focus-visible {
+        textarea:focus-visible, button:focus-visible, canvas:focus-visible, input:focus-visible, summary:focus-visible {
             outline: 2px solid #bb86fc;
             outline-offset: 3px;
         }
@@ -151,9 +151,7 @@
         }
         .zoom-label { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
         .zoom-label input { flex: 1; min-width: 0; accent-color: #f4c47c; }
-        .scenes-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 12px 0; }
-        .scenes-heading h2 { margin: 0; }
-        .scene-save, .scene-retry {
+        .scene-retry {
             width: auto;
             min-height: 44px;
             padding: 10px 14px;
@@ -162,24 +160,76 @@
             justify-content: center;
             gap: 8px;
         }
-        .scene-save { background: #f4c47c; color: #121212; font-weight: 600; }
-        .scene-save:hover:not(:disabled) { background: #ffdaa2; }
-        .scene-save svg { width: 18px; height: 18px; }
-        .scene-current { margin-bottom: 12px; }
-        .scene-current-label { display: block; margin-bottom: 8px; color: #bbb; font-size: 0.8rem; }
+        .scene-library { margin-top: 12px; }
+        .scene-library summary {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-height: 54px;
+            box-sizing: border-box;
+            padding: 16px 20px;
+            border-radius: 12px;
+            background: #1e1e1e;
+            color: #e0e0e0;
+            font-size: 1rem;
+            font-weight: 500;
+            list-style: none;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        .scene-library summary::-webkit-details-marker { display: none; }
+        .scene-library summary:hover { background: #292929; }
+        .scene-count { margin-left: auto; color: #bbb; font-size: 0.9rem; }
+        .scene-chevron { width: 18px; height: 18px; flex-shrink: 0; transition: transform 0.2s ease; }
+        .scene-library[open] .scene-chevron { transform: rotate(180deg); }
+        .scene-library-content { padding-top: 12px; }
         .scene-preview { display: block; width: 100%; height: auto; border-radius: 6px; image-rendering: pixelated; }
         .scene-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-        .scene-card { display: block; min-width: 0; padding: 10px; box-shadow: none; }
+        .scene-tile { position: relative; min-width: 0; }
+        .scene-card { display: block; min-width: 0; min-height: 64px; padding: 10px; box-shadow: none; touch-action: pan-y; user-select: none; -webkit-touch-callout: none; }
         .scene-card:hover { background: #292929; }
-        .scene-card[aria-pressed="true"] { outline: 1px solid #f4c47c; }
+        .scene-card[aria-pressed="true"] { outline: 2px solid #f4c47c; outline-offset: -1px; }
         .scene-card:focus-visible { outline: 2px solid #bb86fc; }
-        .scene-caption { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-top: 10px; font-size: 0.8rem; }
-        .scene-action { display: flex; align-items: center; gap: 4px; color: #f4c47c; }
-        .scene-action svg { width: 12px; height: 12px; }
-        #scene-hint { margin: 0 0 12px; }
+        .scene-delete {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 44px;
+            height: 44px;
+            padding: 14px;
+            justify-content: center;
+            background: transparent;
+            color: #fff;
+            box-shadow: none;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.15s ease;
+        }
+        .scene-delete::before { content: ""; position: absolute; inset: 6px; border-radius: 8px; background: #333; }
+        .scene-delete svg { position: relative; width: 16px; height: 16px; flex-shrink: 0; }
+        .scene-delete:hover::before { background: #555; }
+        .scene-card:focus-visible + .scene-delete, .scene-delete:focus-visible, .scene-tile.is-held .scene-delete { opacity: 1; pointer-events: auto; }
+        @media (hover: hover) {
+            .scene-tile:hover .scene-delete { opacity: 1; pointer-events: auto; }
+        }
+        #scene-delete-dialog {
+            width: min(360px, calc(100% - 32px));
+            box-sizing: border-box;
+            padding: 24px;
+            border: none;
+            border-radius: 16px;
+            background: #1e1e1e;
+            color: #e0e0e0;
+            box-shadow: 0 12px 36px rgba(0,0,0,0.5);
+        }
+        #scene-delete-dialog::backdrop { background: rgba(0,0,0,0.7); }
+        #scene-delete-dialog h2 { margin: 0 0 18px; font-size: 1.1rem; color: #e0e0e0; }
+        .scene-dialog-actions { display: flex; gap: 10px; margin-top: 20px; }
+        .scene-dialog-actions button { min-height: 44px; padding: 12px; justify-content: center; background: #333; box-shadow: none; font-size: 1rem; }
+        #scene-delete-confirm { background: #cf6679; color: #121212; font-weight: 600; }
         [hidden] { display: none !important; }
         @media (prefers-reduced-motion: reduce) {
-            button, .indicator { transition: none; }
+            button, .indicator, .scene-chevron, .scene-delete { transition: none; }
         }
 
         /* The Dot Indicator */
@@ -247,21 +297,24 @@
         </form>
 
         <section id="scenes" aria-labelledby="scenes-title">
-            <div class="scenes-heading">
-                <h2 id="scenes-title">Scenes</h2>
-                <button class="scene-save" id="scene-save" type="button" data-board-command disabled aria-label="Save the drawing on the board">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/></svg>
-                    <span id="scene-save-label">Save scene</span>
-                </button>
-            </div>
-            <div class="scene-current" id="scene-current" hidden>
-                <span class="scene-current-label">On board</span>
-                <canvas class="scene-preview" id="scene-current-preview" width="768" height="192" role="img" aria-label="Drawing currently on the board"></canvas>
-            </div>
+            <button class="send-button" id="scene-save" type="button" data-board-command disabled aria-label="Save scene from the board" aria-describedby="scene-hint" title="Save the drawing currently on the board">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/></svg>
+                <span id="scene-save-label">Save scene</span>
+            </button>
             <p class="editor-status" id="scene-hint"></p>
-            <div class="scene-grid" id="scene-list" aria-label="Saved scenes"></div>
             <p class="editor-status" id="scene-status" role="status" aria-live="polite"></p>
             <button class="scene-retry" id="scene-retry" type="button" hidden>Retry</button>
+            <details class="scene-library" id="scene-library">
+                <summary id="scenes-title">
+                    <span>Saved scenes</span>
+                    <span class="scene-count" id="scene-count"></span>
+                    <svg class="scene-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                </summary>
+                <div class="scene-library-content">
+                    <div class="scene-grid" id="scene-list" aria-label="Saved scenes"></div>
+                    <p class="editor-status" id="scene-empty" hidden>No saved scenes yet.</p>
+                </div>
+            </details>
             <noscript><p class="editor-status">Enable JavaScript to save and play scenes.</p></noscript>
         </section>
 
@@ -283,6 +336,16 @@
             <p class="editor-status" role="status" aria-live="polite"></p>
         </form>
     </div>
+
+    <dialog id="scene-delete-dialog" aria-labelledby="scene-delete-title">
+        <h2 id="scene-delete-title">Delete this scene?</h2>
+        <canvas class="scene-preview" id="scene-delete-preview" width="768" height="192" role="img" aria-label="Drawing to delete"></canvas>
+        <p class="editor-status error" id="scene-delete-error" role="status" aria-live="polite"></p>
+        <div class="scene-dialog-actions">
+            <button type="button" id="scene-delete-cancel" autofocus>Cancel</button>
+            <button type="button" id="scene-delete-confirm" data-board-command>Delete</button>
+        </div>
+    </dialog>
 
     <script src="{{ url_for('static', filename='editors.js') }}" defer></script>
 </body>

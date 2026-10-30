@@ -161,7 +161,7 @@
             buttons.forEach((button, index) => { button.disabled = disabled[index]; });
             sending = false;
             updateSaveButton();
-            void refreshScenes();
+            return refreshScenes();
         };
     }
 
@@ -199,15 +199,18 @@
 
     const sceneSave = document.getElementById("scene-save");
     const sceneSaveLabel = document.getElementById("scene-save-label");
-    const sceneCurrent = document.getElementById("scene-current");
-    const scenePreview = document.getElementById("scene-current-preview");
     const sceneList = document.getElementById("scene-list");
     const sceneHint = document.getElementById("scene-hint");
     const sceneStatus = document.getElementById("scene-status");
     const sceneRetry = document.getElementById("scene-retry");
+    const deleteDialog = document.getElementById("scene-delete-dialog");
+    const deleteConfirm = document.getElementById("scene-delete-confirm");
+    const deleteCancel = document.getElementById("scene-delete-cancel");
+    const deleteError = document.getElementById("scene-delete-error");
+    let pendingDeletion = null;
     let currentPixels = null;
     let sceneVersion = 0;
-    let sceneIds = null;
+    let sceneSignature = null;
     let loadFailed = false;
     let savedTimer;
 
@@ -235,65 +238,163 @@
     async function playScene(scene, button) {
         const finish = beginSubmission();
         if (!finish) return;
-        const action = button.querySelector(".scene-action");
-        action.textContent = "Playing…";
         button.setAttribute("aria-busy", "true");
         setSceneStatus("");
         try {
             await postForm({action: `/scenes/${scene.id}/play`}, new FormData());
-            setSceneStatus(`Scene ${scene.id} is on the board.`);
         } catch (error) {
             setSceneStatus(error instanceof TypeError || error.name === "AbortError"
                 ? "Could not reach the board. Try playing again." : error.message, true);
         } finally {
             button.removeAttribute("aria-busy");
-            action.textContent = "Play";
             finish();
         }
     }
 
+    function confirmDeletion(scene) {
+        if (sending || deleteDialog.open) return;
+        pendingDeletion = scene;
+        drawScene(document.getElementById("scene-delete-preview"), scene.pixels);
+        deleteError.textContent = "";
+        deleteDialog.showModal();
+    }
+
+    function wireScenePress(button, tile, scene) {
+        let press = null;
+        let suppressClick = false;
+        function cancelPress() {
+            if (press) clearTimeout(press.timer);
+            press = null;
+            tile.classList.remove("is-held");
+        }
+        button.addEventListener("pointerdown", event => {
+            if (!event.isPrimary || event.button !== 0 || sending) return;
+            cancelPress();
+            suppressClick = false;
+            press = {id: event.pointerId, x: event.clientX, y: event.clientY, held: false};
+            button.setPointerCapture(event.pointerId);
+            press.timer = setTimeout(() => {
+                press.held = true;
+                tile.classList.add("is-held");
+            }, 550);
+        });
+        button.addEventListener("pointermove", event => {
+            if (press?.id === event.pointerId && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 10) {
+                suppressClick = true;
+                cancelPress();
+            }
+        });
+        button.addEventListener("pointerup", event => {
+            const held = press?.id === event.pointerId && press.held;
+            cancelPress();
+            if (held) {
+                // The release after a long press must not also replay the scene.
+                suppressClick = true;
+                event.preventDefault();
+                confirmDeletion(scene);
+            }
+        });
+        button.addEventListener("pointercancel", () => { suppressClick = true; cancelPress(); });
+        button.addEventListener("lostpointercapture", cancelPress);
+        button.addEventListener("contextmenu", event => { if (event.pointerType !== "mouse") event.preventDefault(); });
+        button.addEventListener("click", event => {
+            const ignore = suppressClick && event.detail !== 0;
+            suppressClick = false;
+            if (!ignore) void playScene(scene, button);
+        });
+    }
+
     function renderScenes(scenes) {
-        const ids = scenes.map(scene => scene.id).join(",");
+        document.getElementById("scene-count").textContent = scenes.length;
+        document.getElementById("scene-empty").hidden = scenes.length > 0;
+        const signature = scenes.map(scene => `${scene.id}:${scene.pixels}`).join(",");
         // Keep the existing buttons so polling never takes keyboard focus away.
-        if (ids !== sceneIds) {
-            sceneIds = ids;
-            const focusedId = sceneList.contains(document.activeElement)
-                ? document.activeElement.dataset.sceneId : null;
+        if (signature !== sceneSignature) {
+            sceneSignature = signature;
+            const focusedTile = document.activeElement.closest(".scene-tile");
+            const focusedDelete = document.activeElement.classList.contains("scene-delete");
             const cards = scenes.map(scene => {
+                const tile = document.createElement("div");
+                tile.className = "scene-tile";
+                tile.dataset.sceneId = String(scene.id);
+                tile.dataset.pixels = scene.pixels;
                 const button = document.createElement("button");
                 button.type = "button";
                 button.className = "scene-card";
                 button.dataset.boardCommand = "";
-                button.dataset.sceneId = String(scene.id);
                 button.dataset.pixels = scene.pixels;
-                button.setAttribute("aria-label", `Play scene ${scene.id} on the board`);
-                button.title = `Saved ${new Date(scene.created_at).toLocaleString()}`;
+                const savedAt = new Date(scene.created_at).toLocaleString();
+                button.setAttribute("aria-label", `Show drawing saved ${savedAt}`);
                 const preview = document.createElement("canvas");
                 preview.width = 768;
                 preview.height = 192;
                 preview.className = "scene-preview";
                 preview.setAttribute("aria-hidden", "true");
                 drawScene(preview, scene.pixels);
-                const caption = document.createElement("span");
-                caption.className = "scene-caption";
-                const name = document.createElement("span");
-                name.textContent = `Scene ${scene.id}`;
-                const action = document.createElement("span");
-                action.className = "scene-action";
-                caption.append(name, action);
-                button.append(preview, caption);
-                button.addEventListener("click", () => { void playScene(scene, button); });
-                return button;
+                button.append(preview);
+                const remove = document.createElement("button");
+                remove.type = "button";
+                remove.className = "scene-delete";
+                remove.dataset.boardCommand = "";
+                remove.setAttribute("aria-label", `Delete drawing saved ${savedAt}`);
+                const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                icon.setAttribute("viewBox", "0 0 16 16");
+                icon.setAttribute("aria-hidden", "true");
+                const path = document.createElementNS(icon.namespaceURI, "path");
+                path.setAttribute("d", "M4 4l8 8M12 4l-8 8");
+                path.setAttribute("fill", "none");
+                path.setAttribute("stroke", "currentColor");
+                path.setAttribute("stroke-width", "1.8");
+                path.setAttribute("stroke-linecap", "round");
+                icon.append(path);
+                remove.append(icon);
+                remove.addEventListener("click", () => confirmDeletion(scene));
+                tile.append(button, remove);
+                wireScenePress(button, tile, scene);
+                return tile;
             });
             sceneList.replaceChildren(...cards);
-            if (focusedId !== null) cards.find(button => button.dataset.sceneId === focusedId)?.focus({preventScroll: true});
+            if (focusedTile) {
+                const replacement = cards.find(tile => tile.dataset.sceneId === focusedTile.dataset.sceneId && tile.dataset.pixels === focusedTile.dataset.pixels);
+                (replacement?.querySelector(focusedDelete ? ".scene-delete" : ".scene-card") || document.getElementById("scenes-title")).focus({preventScroll: true});
+            }
         }
-        sceneList.querySelectorAll("button").forEach(button => {
+        sceneList.querySelectorAll(".scene-card").forEach(button => {
             const active = button.dataset.pixels === currentPixels;
             button.setAttribute("aria-pressed", String(active));
-            button.querySelector(".scene-action").textContent = active ? "On board" : "Play";
         });
     }
+
+    deleteCancel.addEventListener("click", () => deleteDialog.close());
+    deleteDialog.addEventListener("close", () => { pendingDeletion = null; });
+    deleteDialog.addEventListener("cancel", event => {
+        if (deleteDialog.getAttribute("aria-busy") === "true") event.preventDefault();
+    });
+    deleteConfirm.addEventListener("click", async () => {
+        if (!pendingDeletion) return;
+        const scene = pendingDeletion;
+        const finish = beginSubmission();
+        if (!finish) return;
+        deleteDialog.setAttribute("aria-busy", "true");
+        deleteCancel.disabled = true;
+        deleteConfirm.textContent = "Deleting…";
+        deleteError.textContent = "";
+        const payload = new FormData();
+        payload.set("pixels", scene.pixels);
+        try {
+            await requestJSON(`/scenes/${scene.id}`, {method: "DELETE", body: payload});
+            deleteDialog.close();
+            setSceneStatus("");
+        } catch (error) {
+            deleteError.textContent = error instanceof TypeError || error.name === "AbortError"
+                ? "Could not delete the scene. Try again." : error.message;
+        } finally {
+            deleteDialog.removeAttribute("aria-busy");
+            deleteCancel.disabled = false;
+            deleteConfirm.textContent = "Delete";
+            await finish();
+        }
+    });
 
     async function refreshScenes() {
         if (sending || document.hidden) return;
@@ -305,8 +406,6 @@
             if (version !== sceneVersion || sending) return;
             updateActiveMode(state.active_script);
             currentPixels = state.pixels;
-            sceneCurrent.hidden = currentPixels === null;
-            if (currentPixels !== null) drawScene(scenePreview, currentPixels);
             sceneHint.textContent = currentPixels === null ? "Send a drawing to save it here." : "";
             renderScenes(library.scenes);
             updateSaveButton();
@@ -336,6 +435,7 @@
         try {
             const result = await requestJSON("/scenes", {method: "POST", body: payload});
             sceneSaveLabel.textContent = "Saved";
+            document.getElementById("scene-library").open = true;
             setSceneStatus(result.created ? "Scene saved." : "This scene is already saved.");
         } catch (error) {
             sceneSaveLabel.textContent = "Save scene";

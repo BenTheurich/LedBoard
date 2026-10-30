@@ -125,6 +125,47 @@ class SceneTests(unittest.TestCase):
         self.assertEqual([scene["pixels"] for scene in scenes], [OTHER_PIXELS, PIXELS])
         self.assertEqual(restarted.get(first.get_json()["scene"]["id"]), first.get_json()["scene"])
 
+    def test_delete_removes_only_the_confirmed_scene_and_keeps_its_drawing_on_board(self):
+        self.send()
+        scene = self.save().get_json()["scene"]
+        other, _ = SceneStore(self.database).save(OTHER_PIXELS)
+        previous = controller.current_process
+        with patch.object(controller, "launch_mode") as launch, \
+                patch.object(controller, "clear_display") as clear:
+            response = self.client.delete(f"/scenes/{scene['id']}", data={"pixels": PIXELS})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_json(), {"deleted": True})
+            self.assertEqual(self.client.post(f"/scenes/{scene['id']}/play").status_code, 404)
+            self.assertEqual(self.client.delete(f"/scenes/{scene['id']}",
+                                              data={"pixels": PIXELS}).status_code, 404)
+            launch.assert_not_called()
+            clear.assert_not_called()
+        self.assertIs(controller.current_process, previous)
+        self.assertEqual(self.client.get("/drawing").get_json(),
+                         {"active_script": "Pixel Drawing", "pixels": PIXELS})
+        self.assertEqual(SceneStore(self.database).list(), [other])
+
+    def test_invalid_and_stale_deletions_preserve_scenes_even_when_an_id_is_reused(self):
+        self.send()
+        scene = self.save().get_json()["scene"]
+        url = f"/scenes/{scene['id']}"
+        for data in ({}, {"pixels": ""}, {"pixels": "0" * 1023}, {"pixels": "x" * 1024}):
+            with self.subTest(data=str(data)[:30]):
+                self.assertEqual(self.client.delete(url, data=data).status_code, 400)
+        response = self.client.delete(url, data={"pixels": OTHER_PIXELS})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("changed", response.get_json()["error"])
+        self.assertEqual(SceneStore(self.database).list(), [scene])
+        for missing in (0, scene["id"] + 1, 10 ** 50):
+            with self.subTest(missing=missing):
+                self.assertEqual(self.client.delete(f"/scenes/{missing}",
+                                                  data={"pixels": PIXELS}).status_code, 404)
+        self.assertEqual(self.client.delete(url, data={"pixels": PIXELS}).status_code, 200)
+        replacement, _ = SceneStore(self.database).save(OTHER_PIXELS)
+        self.assertEqual(replacement["id"], scene["id"])
+        self.assertEqual(self.client.delete(url, data={"pixels": PIXELS}).status_code, 409)
+        self.assertEqual(SceneStore(self.database).list(), [replacement])
+
     def test_unavailable_storage_preserves_display_and_existing_database_bytes(self):
         self.send()
         self.database.parent.mkdir(parents=True)
@@ -133,7 +174,8 @@ class SceneTests(unittest.TestCase):
         previous = controller.current_process
         with patch.object(controller, "launch_mode") as launch:
             for method, url, data in (("get", "/scenes", None), ("post", "/scenes", {"pixels": PIXELS}),
-                                      ("post", "/scenes/1/play", None)):
+                                      ("post", "/scenes/1/play", None),
+                                      ("delete", "/scenes/1", {"pixels": PIXELS})):
                 with self.subTest(method=method, url=url):
                     response = getattr(self.client, method)(url, data=data)
                     self.assertEqual(response.status_code, 503)
@@ -144,6 +186,7 @@ class SceneTests(unittest.TestCase):
         self.assertEqual(controller.active_drawing_pixels, PIXELS)
         controller.app.config["SCENES_DATABASE"] = self.database.parent
         self.assertEqual(self.save().status_code, 503)
+        self.assertEqual(self.client.delete("/scenes/1", data={"pixels": PIXELS}).status_code, 503)
 
     def test_missing_and_damaged_scenes_never_launch_a_drawing(self):
         self.send()
@@ -167,7 +210,7 @@ class SceneTests(unittest.TestCase):
                             origin, "test-only-secret-at-least-32-characters")
         public = Client(gate, Response)
         for method, url in (("get", "/scenes"), ("get", "/drawing"), ("post", "/scenes"),
-                            ("post", "/scenes/1/play")):
+                            ("post", "/scenes/1/play"), ("delete", "/scenes/1")):
             with self.subTest(method=method, url=url):
                 self.assertEqual(getattr(public, method)(url, base_url=origin).status_code, 401)
         self.assertFalse(self.database.exists())
@@ -178,7 +221,13 @@ class SceneTests(unittest.TestCase):
             for url in ("/scenes", "/scenes/1/play"):
                 self.assertEqual(public.post(url, base_url=origin, data={"pixels": PIXELS},
                                              headers={"Origin": "https://other.example"}).status_code, 403)
+            self.assertEqual(public.delete("/scenes/1", base_url=origin, data={"pixels": PIXELS},
+                                           headers={"Origin": "https://other.example"}).status_code, 403)
             launch.assert_not_called()
+        self.send()
+        scene = self.save().get_json()["scene"]
+        self.assertEqual(public.delete(f"/scenes/{scene['id']}", base_url=origin,
+                                       data={"pixels": PIXELS}, headers={"Origin": origin}).status_code, 200)
 
 
 if __name__ == "__main__":
