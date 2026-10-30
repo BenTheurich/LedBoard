@@ -19,6 +19,8 @@ A 64×16 LED display I built for my desk using a Raspberry Pi Zero WH and MAX721
 
 The controller also has an OFF button. Modes are selected manually. Message and drawing drafts stay in the current browser tab. The Music Visualizer generates simulated spectrum bars; it does not capture audio.
 
+**Scenes** lets anyone with board access save the drawing currently on the display, browse thumbnail previews, and tap one to play it again. Saved drawings are shared across devices and survive restarts. See [saved scenes](docs/application.md#saved-scenes) for storage and deployment details.
+
 Bus departures are configured for **Garching, Untere Straßäcker**, serving lines **230**, **292**, and **X205** toward **Forschungszentrum**. The stop and route filters are in [my_bus_script3.py](app/my_bus_script3.py); weather settings are in [weather.py](app/weather.py).
 
 ## Hardware

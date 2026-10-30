@@ -59,11 +59,13 @@ class ControllerTests(unittest.TestCase):
         controller.app.config["TESTING"] = True
         controller.current_process = None
         controller.active_script_name = "OFF"
+        controller.active_drawing_pixels = None
         controller.switch_lock = threading.Lock()
 
     def tearDown(self):
         controller.current_process = None
         controller.active_script_name = "OFF"
+        controller.active_drawing_pixels = None
         controller.switch_lock = threading.Lock()
 
     def test_overlapping_switches_leave_only_one_live_child(self):
