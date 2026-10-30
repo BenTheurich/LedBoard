@@ -4,7 +4,7 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, request, redirect
 from message import MAX_MESSAGE_LENGTH, validate_message
 from drawing import WIDTH, HEIGHT, validate_pixels
-from scenes import SceneStorageError, SceneStore
+from scenes import SceneConflictError, SceneStorageError, SceneStore
 from mode_switch import (ModeStartError, clear_display, get_display_owner,
                          launch_mode, shutdown_display, stop_process)
 
@@ -214,6 +214,21 @@ def play_scene(scene_id):
     with switch_lock:
         switch_program("Pixel Drawing", ("--pixels=" + pixels,), drawing_pixels=pixels)
     return jsonify(active_script="Pixel Drawing")
+
+
+@app.route("/scenes/<int:scene_id>", methods=["DELETE"])
+def delete_scene(scene_id):
+    try:
+        pixels = validate_pixels(request.form.get("pixels", ""))
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+    try:
+        deleted = SceneStore(app.config["SCENES_DATABASE"]).delete(scene_id, pixels)
+    except SceneConflictError as error:
+        return jsonify(error=str(error)), 409
+    if not deleted:
+        return jsonify(error="This scene no longer exists. Refresh the scenes and try again."), 404
+    return jsonify(deleted=True)
 
 
 @app.errorhandler(413)

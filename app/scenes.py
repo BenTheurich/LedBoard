@@ -11,6 +11,10 @@ class SceneStorageError(RuntimeError):
     pass
 
 
+class SceneConflictError(RuntimeError):
+    pass
+
+
 class SceneStore:
     def __init__(self, path):
         self.path = Path(path)
@@ -70,3 +74,18 @@ class SceneStore:
                 "SELECT id, pixels, created_at FROM scenes WHERE pixels = ?", (pixels,)
             ).fetchone())
             return scene, inserted
+
+    def delete(self, scene_id, pixels):
+        pixels = validate_pixels(pixels)
+        if not 0 < scene_id <= 2 ** 63 - 1:
+            return False
+        with self._connection() as connection:
+            # SQLite may reuse a deleted ID; match the confirmed image as well.
+            deleted = connection.execute(
+                "DELETE FROM scenes WHERE id = ? AND pixels = ?", (scene_id, pixels)
+            ).rowcount == 1
+            if not deleted and connection.execute(
+                "SELECT 1 FROM scenes WHERE id = ?", (scene_id,)
+            ).fetchone() is not None:
+                raise SceneConflictError("This scene changed. Refresh the scenes and try again.")
+            return deleted
