@@ -1,13 +1,16 @@
 import socket
 import threading
+from pathlib import Path
 from flask import Flask, jsonify, render_template, request, redirect
 from message import MAX_MESSAGE_LENGTH, validate_message
 from drawing import WIDTH, HEIGHT, validate_pixels
+from scenes import SceneStorageError, SceneStore
 from mode_switch import (ModeStartError, clear_display, get_display_owner,
                          launch_mode, shutdown_display, stop_process)
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 4096
+app.config["SCENES_DATABASE"] = Path.home() / ".garching-board" / "scenes.sqlite3"
 
 # --- CONFIGURATION ---
 SCRIPTS = {
@@ -32,6 +35,7 @@ MODE_GROUPS = {
 
 current_process = None
 active_script_name = "OFF" # Tracks which button should be green
+active_drawing_pixels = None
 # Flask serves requests concurrently; display ownership must change atomically.
 switch_lock = threading.Lock()
 
@@ -85,12 +89,13 @@ def controller_page(message_error=None, message_value="", drawing_error=None):
     )
 
 
-def switch_program(script_name, extra_args=()):
+def switch_program(script_name, extra_args=(), drawing_pixels=None):
     """Serialize selection changes while the owner continues drawing."""
-    global current_process, active_script_name
+    global current_process, active_script_name, active_drawing_pixels
     print(f"Switching to: {script_name}", flush=True)
     previous, current_process = current_process, None
     active_script_name = "OFF"
+    active_drawing_pixels = None
     if script_name == "OFF":
         try:
             clear_display(previous=previous)
@@ -102,6 +107,8 @@ def switch_program(script_name, extra_args=()):
         except ModeStartError as error:
             raise ModeStartError(f"Could not start {script_name}. Try again.") from error
     active_script_name = script_name
+    if script_name == "Pixel Drawing":
+        active_drawing_pixels = drawing_pixels
 
 @app.route("/run", methods=["POST"])
 def run_script():
@@ -124,7 +131,7 @@ def run_script():
 
 @app.errorhandler(ModeStartError)
 def mode_start_failed(error):
-    if request.accept_mimetypes.best == "application/json":
+    if request.accept_mimetypes.best == "application/json" or request.endpoint == "play_scene":
         with switch_lock:
             selected_script = active_script_name
         return jsonify(error=str(error), active_script=selected_script), 500
@@ -157,10 +164,56 @@ def send_drawing():
             return jsonify(error=str(error)), 400
         return controller_page(drawing_error=str(error)), 400
     with switch_lock:
-        switch_program("Pixel Drawing", ("--pixels=" + pixels,))
+        switch_program("Pixel Drawing", ("--pixels=" + pixels,), drawing_pixels=pixels)
     if request.accept_mimetypes.best == "application/json":
         return jsonify(active_script="Pixel Drawing")
     return redirect("/#drawing")
+
+
+@app.route("/drawing", methods=["GET"])
+def current_drawing():
+    with switch_lock:
+        response = jsonify(active_script=active_script_name, pixels=active_drawing_pixels)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.errorhandler(SceneStorageError)
+def scene_storage_failed(error):
+    return jsonify(error=str(error)), 503
+
+
+@app.route("/scenes", methods=["GET"])
+def list_scenes():
+    response = jsonify(scenes=SceneStore(app.config["SCENES_DATABASE"]).list())
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/scenes", methods=["POST"])
+def save_scene():
+    try:
+        expected = validate_pixels(request.form.get("pixels", ""))
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+    with switch_lock:
+        # Save the preview the visitor actually saw, rather than a newer drawing.
+        if active_script_name != "Pixel Drawing" or active_drawing_pixels != expected:
+            return jsonify(error="The drawing changed. Check the preview and save again."), 409
+        pixels = active_drawing_pixels
+    scene, created = SceneStore(app.config["SCENES_DATABASE"]).save(pixels)
+    return jsonify(scene=scene, created=created), 201 if created else 200
+
+
+@app.route("/scenes/<int:scene_id>/play", methods=["POST"])
+def play_scene(scene_id):
+    scene = SceneStore(app.config["SCENES_DATABASE"]).get(scene_id)
+    if scene is None:
+        return jsonify(error="This scene could not be found. Refresh the scenes and try again."), 404
+    pixels = scene["pixels"]
+    with switch_lock:
+        switch_program("Pixel Drawing", ("--pixels=" + pixels,), drawing_pixels=pixels)
+    return jsonify(active_script="Pixel Drawing")
 
 
 @app.errorhandler(413)

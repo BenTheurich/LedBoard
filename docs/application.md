@@ -85,6 +85,16 @@ The pixel drawing editor mirrors all 64×16 pixels. Mouse dragging, touch, and k
 
 `matrix_text.py` shares weather and message layout and caches glyph images so scrolling frames only crop pixels. Weather, messages, and drawings use `effect_runner.py` for matrix ownership, frame pacing, and clearing on exit. Deploy `weather.py`, `message.py`, `drawing.py`, `browser_access.py`, and `matrix_text.py` alongside the updated controller, `templates/index.html`, and `static/editors.js` in the existing flat `/home/ben` layout. Preserve the `templates/` and `static/` directories. Follow the staged tests and recovery procedure below before replacing live files.
 
+### Saved scenes
+
+The **Scenes** section shows the drawing currently on the board, including drawings sent by other visitors. **Save scene** stores that preview in a shared library. Tap a saved thumbnail to play it on the board; the drawing editor keeps its own draft. Scenes capture static pixel drawings. Animated modes and messages are not saved.
+
+Scenes are stored in SQLite at `~/.garching-board/scenes.sqlite3`, outside the deployed source files, and survive controller restarts. Repeated saves of identical pixels reuse the existing scene. Back up this database with the board's other persistent data. Tests and isolated previews can set Flask's `SCENES_DATABASE` configuration to a separate path. No additional Python package is required.
+
+`GET /drawing` returns the active mode and its drawing pixels, or `null` when another mode is selected. `GET /scenes` lists saved scenes newest first. `POST /scenes` accepts the preview's `pixels` field and saves it only if it still matches the active drawing; a changed board returns 409 so the visitor can check the refreshed preview. `POST /scenes/<id>/play` sends the saved pixels through the normal serialized drawing switch. These routes use the existing password and origin checks on the public listener. The page refreshes the preview and library every ten seconds while visible and after commands.
+
+Deploy `scenes.py` alongside the updated `app.py`, `templates/index.html`, and `static/editors.js`. Keep the database outside release replacement and rollback targets. A controller restart clears the active drawing preview until another drawing is sent or played; saved scenes remain available.
+
 ## Sharing access
 
 The controller already listens on all interfaces at port 5000. The documented `100.111.233.84` address belongs to Tailscale; residents connected only to HHG Wi-Fi need the Pi's current Wi-Fi IP instead. The `10.x` lease recorded in the setup notes may have changed. If the numeric Wi-Fi address works but `garching-board.local` does not, the issue is hostname discovery. If one resident can reach the numeric address and another cannot, HHG client isolation or separate VLANs are possible causes; the network policy has not been verified. An HHG administrator can confirm whether a shared-device network or exception is available.

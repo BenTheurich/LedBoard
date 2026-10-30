@@ -151,6 +151,33 @@
         }
         .zoom-label { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
         .zoom-label input { flex: 1; min-width: 0; accent-color: #f4c47c; }
+        .scenes-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 12px 0; }
+        .scenes-heading h2 { margin: 0; }
+        .scene-save, .scene-retry {
+            width: auto;
+            min-height: 44px;
+            padding: 10px 14px;
+            font-size: 0.95rem;
+            box-shadow: none;
+            justify-content: center;
+            gap: 8px;
+        }
+        .scene-save { background: #f4c47c; color: #121212; font-weight: 600; }
+        .scene-save:hover:not(:disabled) { background: #ffdaa2; }
+        .scene-save svg { width: 18px; height: 18px; }
+        .scene-current { margin-bottom: 12px; }
+        .scene-current-label { display: block; margin-bottom: 8px; color: #bbb; font-size: 0.8rem; }
+        .scene-preview { display: block; width: 100%; height: auto; border-radius: 6px; image-rendering: pixelated; }
+        .scene-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .scene-card { display: block; min-width: 0; padding: 10px; box-shadow: none; }
+        .scene-card:hover { background: #292929; }
+        .scene-card[aria-pressed="true"] { outline: 1px solid #f4c47c; }
+        .scene-card:focus-visible { outline: 2px solid #bb86fc; }
+        .scene-caption { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-top: 10px; font-size: 0.8rem; }
+        .scene-action { display: flex; align-items: center; gap: 4px; color: #f4c47c; }
+        .scene-action svg { width: 12px; height: 12px; }
+        #scene-hint { margin: 0 0 12px; }
+        [hidden] { display: none !important; }
         @media (prefers-reduced-motion: reduce) {
             button, .indicator { transition: none; }
         }
@@ -218,6 +245,25 @@
             </button>
             <p class="editor-status{% if drawing_error %} error{% endif %}" id="drawing-error" role="status" aria-live="polite">{{ drawing_error or '' }}</p>
         </form>
+
+        <section id="scenes" aria-labelledby="scenes-title">
+            <div class="scenes-heading">
+                <h2 id="scenes-title">Scenes</h2>
+                <button class="scene-save" id="scene-save" type="button" data-board-command disabled aria-label="Save the drawing on the board">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z"/><path d="M7 3v6h10V3M7 21v-8h10v8"/></svg>
+                    <span id="scene-save-label">Save scene</span>
+                </button>
+            </div>
+            <div class="scene-current" id="scene-current" hidden>
+                <span class="scene-current-label">On board</span>
+                <canvas class="scene-preview" id="scene-current-preview" width="768" height="192" role="img" aria-label="Drawing currently on the board"></canvas>
+            </div>
+            <p class="editor-status" id="scene-hint"></p>
+            <div class="scene-grid" id="scene-list" aria-label="Saved scenes"></div>
+            <p class="editor-status" id="scene-status" role="status" aria-live="polite"></p>
+            <button class="scene-retry" id="scene-retry" type="button" hidden>Retry</button>
+            <noscript><p class="editor-status">Enable JavaScript to save and play scenes.</p></noscript>
+        </section>
 
         <h2>Visualizers</h2>
         {% for name in groups['Visualizers'] %}
